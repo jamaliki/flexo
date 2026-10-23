@@ -521,7 +521,14 @@ def _tones(spec) -> dict[str, Any]:
     # The theme's grey, as a shape toned ``neutral`` is painted (its block paint).
     neutral = {part: palette.get(f"block-{part}") for part in ("fill", "stroke", "motif")}
     neutral["ink"] = palette.get("ink")
-    return {"colours": colours, "used": _tone_map(spec, figure_style(spec)), "neutral": neutral}
+    # And a frame's, of no colour: the container's fill and outline (flexo.frames).
+    container = {part: palette.get(f"container-{part}") for part in ("fill", "stroke")}
+    return {
+        "colours": colours,
+        "used": _tone_map(spec, figure_style(spec)),
+        "neutral": neutral,
+        "container": container,
+    }
 
 
 def outline(spec) -> dict[str, Any]:
@@ -562,13 +569,20 @@ def outline(spec) -> dict[str, Any]:
     return {"root": tree(spec.root), "edges": edges, "nets": [net.id for net in spec.nets]}
 
 
-def parse(text: str, base: Path, *, suffix: str = ".yaml"):
+def parse(text: str, base: Path, *, suffix: str = ".yaml", libyaml: bool = False):
     """A figure from its file's words, theme and palette files -- and the pictures and
-    structures its parts draw -- found from ``base``."""
+    structures its parts draw -- found from ``base``. (``libyaml``: its YAML read by libyaml,
+    where there is one -- as safe_load reads it, eight times sooner, but for what it says of
+    words that do not read.)"""
 
     from flexo.serialization import found_beside, parse_figure
 
-    document = json.loads(text) if suffix == ".json" else yaml.safe_load(text)
+    if suffix == ".json":
+        document = json.loads(text)
+    elif libyaml:
+        document = yaml.load(text, getattr(yaml, "CSafeLoader", yaml.SafeLoader))
+    else:
+        document = yaml.safe_load(text)
     if not isinstance(document, dict):
         raise ValueError("a figure file is a mapping: figure, nodes, edges, groups")
     return parse_figure(found_beside(document, base))

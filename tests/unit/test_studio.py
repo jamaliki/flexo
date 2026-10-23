@@ -1712,6 +1712,10 @@ def test_a_drawn_figure_says_which_colour_each_tone_takes(tmp_path: Path) -> Non
     # with them on the page at once (parts.js retoned).
     assert all(set(colour) == {"fill", "stroke", "ink", "motif"} for colour in tones["colours"])
     assert set(tones["neutral"]) == {"fill", "stroke", "ink", "motif"}
+    # And a frame's of no colour, the container's fill and outline: a frame given a colour, or
+    # made grey again, is painted so at once too.
+    assert set(tones["container"]) == {"fill", "stroke"}
+    assert all(str(value).startswith("#") for value in tones["container"].values())
 
 
 def test_the_figures_guide_for_agents_says_how_each_thing_is_written_and_says_it_truly() -> None:
