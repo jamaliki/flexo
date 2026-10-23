@@ -49,6 +49,7 @@ _LOCK = threading.Lock()
 _RECORDING: contextvars.ContextVar[list | None] = contextvars.ContextVar(
     "flexo_draft_recording", default=None
 )
+_AHEAD = contextvars.ContextVar("flexo_draft_ahead", default=False)
 
 
 @contextmanager
@@ -67,7 +68,7 @@ def recall(kind: str, key: Any) -> Any:
 
     with _LOCK:
         found = _REMEMBERED.get((kind, key))
-        if found is not None:
+        if found is not None and not _AHEAD.get():
             _REMEMBERED.move_to_end((kind, key))
         return found
 
@@ -78,6 +79,8 @@ def remember(kind: str, key: Any, value: Any) -> None:
     made = _RECORDING.get()
     if made is not None:
         made.append((kind, key, value))
+    if _AHEAD.get():
+        return
     with _LOCK:
         _REMEMBERED[(kind, key)] = value
         _REMEMBERED.move_to_end((kind, key))
@@ -100,6 +103,20 @@ def recording() -> Iterator[list[tuple[str, Any, Any]]]:
         _RECORDING.reset(token)
         if outer is not None:
             outer.extend(made)
+
+
+@contextmanager
+def ahead() -> Iterator[None]:
+    """Figures drawn within are drawn ahead of time, to be found kept (``flexo.boxfit.kept``)
+    when they are asked for: what each remembers is only recorded (``recording``), remembered
+    when it is found, and what each recalls leaves the memory as it was -- as though nothing
+    had been drawn."""
+
+    token = _AHEAD.set(True)
+    try:
+        yield
+    finally:
+        _AHEAD.reset(token)
 
 
 def remember_again(made: list[tuple[str, Any, Any]]) -> None:

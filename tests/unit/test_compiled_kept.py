@@ -97,3 +97,24 @@ def test_drafts_remembered_within_a_recording_are_in_it_and_in_any_around_it() -
     assert outer == [("layout", ("a",), 1), ("routes", ("b",), 2)]
     draft.remember_again(outer)
     assert draft.recall("routes", ("b",)) == 2
+
+
+def test_a_figure_drawn_ahead_is_remembered_only_once_it_is_found() -> None:
+    """Drawn ahead of time (``draft.ahead``), what a figure's drawing remembers for its drafts is
+    recorded but not remembered, and what it recalls leaves the memory as it was: remembered
+    when the drawing is found kept, as though drawn then."""
+
+    flexo.fit_in_box(_flow("Before").spec, 520, 160.0)
+    before = list(draft._REMEMBERED.items())
+    store = boxfit.Kept()
+    spec = _flow("Ahead").spec
+    with draft.ahead(), boxfit.kept(store, "a slide"):
+        flexo.fit_in_box(spec, 520, 160.0, keep="as written", whole=True)
+    assert list(draft._REMEMBERED.items()) == before
+    with boxfit.kept(store, "a slide"):
+        flexo.fit_in_box(spec, 520, 120.0, keep="as written", whole=True)
+    kept_now = list(draft._REMEMBERED.items())
+    flexo.fit_in_box(spec, 520, 120.0, keep="as written", whole=True)  # (drawn, not found)
+    assert [key for key, _ in kept_now[-2:]] == [
+        key for key, _ in list(draft._REMEMBERED.items())[-2:]
+    ]
