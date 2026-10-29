@@ -857,7 +857,8 @@ class _Font:
         from fontTools.pens.cu2quPen import Cu2QuPen
         from fontTools.pens.ttGlyphPen import TTGlyphPen
 
-        cubic = "CFF " in _tables(self.face) or "CFF2" in _tables(self.face)
+        source = _source(self.face)
+        cubic = "CFF " in source or "CFF2" in source
         order = [".notdef"] + [f"g{cid}" for cid in range(1, len(self.cids) + 1)]
         glyphs = {".notdef": TTGlyphPen(None).glyph()}
         for gid, cid in self.cids.items():
@@ -867,6 +868,9 @@ class _Font:
             _replay(_outline(self.face, self.weight, max(gid, 0)), target)
             glyphs[f"g{cid}"] = pen.glyph()
         builder = FontBuilder(upem, isTTF=True)
+        # The face's own dates, not the time the subset is made (as FontBuilder would stamp it,
+        # and a PDF of the same figure would differ each second, its subsets' tags too).
+        builder.updateHead(created=source["head"].created, modified=source["head"].modified)
         builder.setupGlyphOrder(order)
         builder.setupCharacterMap({})
         builder.setupGlyf(glyphs)
@@ -898,13 +902,15 @@ class _Font:
         return out.getvalue(), box
 
 
-def _tables(face: FontFace) -> set[str]:
+def _source(face: FontFace):
+    """``face``'s font, read lazily: its tables are read as they are asked for."""
+
     from fontTools.ttLib import TTCollection, TTFont
 
     raw = BytesIO(load_face(face).raw)
     if face.source.lower().endswith((".ttc", ".otc")):
-        return set(TTCollection(raw, lazy=True).fonts[face.index].keys())
-    return set(TTFont(raw, lazy=True).keys())
+        return TTCollection(raw, lazy=True).fonts[face.index]
+    return TTFont(raw, lazy=True)
 
 
 def _replay(segments: Sequence[Segment], pen) -> None:
