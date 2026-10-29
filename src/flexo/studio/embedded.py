@@ -115,7 +115,8 @@ class FigureView(Doc):
         self.unsaved_since = 0.0
         self.retry_at = 0.0
         self.on_disk = None
-        self.recent: deque[tuple[str, bool]] = deque(maxlen=RECENT)
+        self.recent: deque[tuple[str, bool, bool]] = deque(maxlen=RECENT)
+        self.told = None
         self.opened_at = time.time()
         self.disk_text = None
         self.disk_stamp = 0.0

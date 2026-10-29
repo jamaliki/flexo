@@ -456,7 +456,9 @@ class Keeper:
         bundle's change stands, what was here kept in that copy, or in a bundle beside it
         (``_keep_aside``); in a folder a cloud service keeps, the folder then waits (``HOLD``)
         for the other computer to save the merge both want. As it opens, edits made here that
-        never reached it are merged likewise."""
+        never reached it are merged likewise. One that names no savings (saved by an older
+        studio, packed again by hand) is taken as made from the version here it is most like
+        (``_most_like``): what was saved here since, it never had, and did not undo."""
 
         revisions = opened.revisions
         latest = self.history.latest
@@ -471,6 +473,8 @@ class Keeper:
             found = self.history.base_for(revisions)
             if found is not None and found is not latest:
                 base, apart = found, True
+        elif not revisions and latest is not None:
+            base = self._most_like(opened) or latest
         theirs = _Side(entries, _reader(opened))
         before = self._folder_side()
         outcome, unclean = self._absorb(self._base_side(base), before, theirs)
@@ -501,6 +505,21 @@ class Keeper:
         self.held_until = now + HOLD if apart and self.service else 0.0
         self._seed()
         return taken
+
+    def _most_like(self, opened: Bundle) -> cloud.Version | None:
+        """The version a bundle that names no savings -- saved by an older studio, packed again
+        by hand -- was most likely made from: the one here whose document its own is nearest
+        (``History.nearest``), what was saved here since it was made being no change of its.
+        None if its document is word for word one this computer had (put back, or unchanged),
+        or can't be read."""
+
+        try:
+            words = opened.read(self.document, most=bundles.MOST_MANIFEST * 50)
+        except (KeyError, BundleError, OSError):
+            return None
+        if self.history.had(self.document, words):
+            return None
+        return self.history.nearest(self.document, words, self.history.versions)
 
     def _absorb(
         self, base: _Side, ours: _Side, theirs: _Side, *, flip: bool = False
@@ -544,10 +563,13 @@ class Keeper:
         """Each file's outcome (``_absorb``) made in the folder: the names changed."""
 
         changed: list[str] = []
+        merging = getattr(self.workspace, "merging", None)
         for name, made in outcome.items():
             target = self.root.joinpath(*name.split("/"))
             if made == "ours":
                 continue
+            if merging is not None and made is not None and _documentlike(name):
+                merging(target)  # (taken in from what the studio has, as merged here)
             if made == "theirs":
                 source.extract(self.root, [name], replace=True)
             elif isinstance(made, bytes):

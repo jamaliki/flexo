@@ -410,3 +410,78 @@ def test_a_bundle_changed_as_it_is_written_is_left_as_it_is(tmp_path: Path) -> N
         )
     assert made.path.read_bytes() == before
     assert [path.name for path in tmp_path.iterdir() if path.name.startswith(".")] == []
+
+
+# -- written from an older version --------------------------------------------------------
+
+
+def _from_an_older_studio(source: Path, target: Path, *edits: tuple[str, str]) -> None:
+    """The bundle at ``source`` (as it was), edited and saved by a studio that names no
+    savings, carried to ``target``."""
+
+    aside = Path(os.environ["FLEXO_BUNDLES"]).parent / "older"
+    with Bundle(source) as opened:
+        opened.extract(aside)
+        about = dict(opened.manifest)
+    text = (aside / "talk.yaml").read_text(encoding="utf-8")
+    for edit in edits:
+        text = text.replace(*edit)
+    (aside / "talk.yaml").write_text(text, encoding="utf-8")
+    about.pop("revisions", None)
+    B.write(aside.parent / "older.flexo", {"talk.yaml": aside / "talk.yaml"}, about)
+    _carried(aside.parent / "older.flexo", target)
+
+
+def test_a_bundle_from_an_older_studio_in_its_place_keeps_the_edits_saved_here() -> None:
+    # Saved by a studio that names no savings, from the bundle as it was before the edit saved
+    # here: taken in from the version it is most like, the edit here kept.
+    ours, theirs = _two_computers("Google Drive")
+    here = studio_bundles.opened(ours)
+    _edit(here, *EDITED_HERE)
+    assert here.save()
+    _from_an_older_studio(theirs, ours, EDITED_THERE)
+    here.step(now=10.0)
+    assert _labels(here) == MERGED
+    here.step(now=10.0 + here.quiet + 1)
+    assert _labels(ours) == MERGED
+
+
+def test_a_bundle_from_an_older_studio_word_for_word_a_version_had_here_puts_it_back() -> None:
+    ours, theirs = _two_computers("Google Drive")
+    here = studio_bundles.opened(ours)
+    _edit(here, *EDITED_HERE)
+    assert here.save()
+    _from_an_older_studio(theirs, ours)  # (the bundle as it first was)
+    here.step(now=10.0)
+    assert _labels(here) == [f"Node {index}" for index in range(1, 13)]
+
+
+def test_another_computers_taking_back_an_edit_made_here_reaches_the_open_document() -> None:
+    # The other computer, having this one's edit, takes it back and edits something else. Its
+    # saving, merged into the folder from the one both had, is taken into the open document as
+    # it is -- not as a change made from before the edit it takes back, which it is nearest.
+    from flexo.studio.workspace import Workspace
+
+    ours, theirs = _two_computers("Google Drive")
+    here = studio_bundles.opened(ours)
+    workspace = Workspace(here.root)
+    workspace._stop.set()  # (no clock: the document takes the file in when asked)
+    here.workspace, workspace.bundle = workspace, here
+    try:
+        doc = workspace.open("talk.yaml")
+        person = {"id": "page-a", "name": "Ada", "kind": "person"}
+        doc.update({"text": doc.document["text"].replace(*EDITED_HERE)}, doc.version, person)
+        assert doc.write() and here.save()
+        _carried(ours, theirs)
+        there = studio_bundles.opened(theirs)
+        _edit(there, "Node 5 sharpened}", "Node 5}")
+        _edit(there, *EDITED_THERE)
+        assert there.save()
+        _carried(theirs, ours)
+        here.step(now=10.0)
+        workspace.reread(doc)
+        labels = [node["label"] for node in yaml.safe_load(doc.document["text"])["nodes"]]
+        assert labels[4] == "Node 5" and labels[8] == "Node 9 in two columns"
+        assert doc.saved == doc.version
+    finally:
+        workspace.close()

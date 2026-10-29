@@ -1519,7 +1519,10 @@ from this machine, for every document in the folder: figures, themes, and --
 with flexo-talk -- decks, each in a tab. It is made for working *with* an
 agent: what anyone changes -- you, Claude in the studio's side panel, an agent
 such as Claude Code working through MCP, or any program writing the files --
-is merged with everyone else's edits, saved, and shown at once. Slides and parts
+is merged with everyone else's edits, saved, and shown at once. A program that
+writes back a whole file it read a while ago changes only what it changed: what
+was saved since it read the file stays, while a file put back as it was
+(`git checkout`, Time Machine) is taken as it is. Slides and parts
 an agent touches flash in its colour, its avatar and what it is doing ("Tightening
 slide 4") show where it works, the activity list says who changed what, and
 **Follow** keeps the view on whatever an agent is changing. Undo takes back your
