@@ -24,7 +24,6 @@ in the Trash (``put_away``): the folder holds one bundle again.
 from __future__ import annotations
 
 import contextlib
-import difflib
 import hashlib
 import os
 import re
@@ -38,6 +37,7 @@ from pathlib import Path
 from typing import Any
 
 from flexo.bundle import MOST_REVISIONS, SUFFIX
+from flexo.studio import nearness
 
 VERSIONS = 100
 """Versions of a bundle a computer keeps (its documents' words, its files' CRCs), to merge
@@ -200,26 +200,24 @@ class History:
         return None
 
     def nearest(self, name: str, words: bytes, among: list[Version]) -> Version | None:
-        """Of ``among``, the version whose document ``name`` is most like ``words``: for a
-        bundle that names no savings, the one it was most likely made from (the newest, of
-        those alike)."""
+        """Of ``among``, the version whose document ``name`` is most like ``words``
+        (``flexo.studio.nearness``): for a bundle that names no savings, the one it was most
+        likely made from (the newest, of those alike)."""
 
-        lines = words.decode("utf-8", "replace").splitlines()
-        scores: dict[str, float] = {}
-        best: tuple[float, Version] | None = None
+        texts: list[str] = []
+        versions: list[Version] = []
+        seen: set[str] = set()
         for version in reversed(among):
             digest = version.texts.get(name)
-            if digest is None:
+            if digest is None or digest in seen:
                 continue
-            if digest not in scores:
-                kept = self.text(version, name)
-                if kept is None:
-                    continue
-                other = kept.decode("utf-8", "replace").splitlines()
-                scores[digest] = difflib.SequenceMatcher(None, other, lines).ratio()
-            if best is None or scores[digest] > best[0]:
-                best = (scores[digest], version)
-        return best[1] if best is not None else None
+            seen.add(digest)
+            kept = self.text(version, name)
+            if kept is not None:
+                texts.append(kept.decode("utf-8", "replace"))
+                versions.append(version)
+        found = nearness.nearest(texts, words.decode("utf-8", "replace"))
+        return next((versions[at] for at, text in enumerate(texts) if text is found), None)
 
     def had(self, name: str, words: bytes) -> bool:
         """Whether a version here had these words for document ``name``."""

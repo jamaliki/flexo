@@ -43,6 +43,7 @@ from flexo.studio import (
     code_allowed,
     folder_root,
     kinds,
+    nearness,
     pictures,
     taking_turns,
     writer,
@@ -154,11 +155,15 @@ class Doc:
         self.unsaved_since = 0.0
         self.retry_at = 0.0
         self.on_disk = copy.deepcopy(self.document) if self.exists and not self.unread else None
-        self.recent: deque[tuple[str, bool]] = deque(maxlen=RECENT)
-        """What the file held, the last times it was read or written (as ``_dumps``), and
-        whether this studio wrote it."""
+        self.recent: deque[tuple[str, bool, bool]] = deque(maxlen=RECENT)
+        """What the file held, the last times it was read or written (as ``_dumps``), whether
+        this studio wrote it, and whether it was a writer's copy of an older version (merged
+        from that: ``reread``)."""
         if self.on_disk is not None:
-            self.recent.append((_dumps(self.on_disk), False))
+            self.recent.append((_dumps(self.on_disk), False, False))
+        self.told: str | None = None
+        """The words of its file a change about to be written there was made from, as its
+        writer says (``Workspace.merging``): taken in from what the studio last read or wrote."""
         self.opened_at = time.time()
         self.disk_text = _words(path) if self.exists else None
         self.disk_stamp = _stamp(path)
@@ -394,7 +399,7 @@ class Doc:
                     self.disk_stamp = _stamp(path)
                     self.file = _file(path)
                     self.on_disk = document
-                    self.recent.append((_dumps(document), True))
+                    self.recent.append((_dumps(document), True, False))
                     self.saved = max(self.saved, version)
                     self.exists = True
                     self.gone, self.moved = False, None
@@ -464,6 +469,7 @@ class Doc:
             return None
         with self.lock:
             self.disk_stamp = stamp
+            told, self.told = self.told, None
             if stamp == 0.0:
                 if not self.exists:
                     return None
@@ -519,11 +525,18 @@ class Doc:
             self.held = self.unread = False
             self.foreign = None
             self.problem = None
-            base = self.on_disk if self.on_disk is not None else self.document
+            seen = _dumps(found)
+            if self.on_disk is None:
+                base, old = self.document, False
+            elif told is not None and told == self.disk_text:
+                # (Made from what the file held, its writer says: a bundle merged here.)
+                base, old = self.on_disk, False
+            else:
+                base, old = self._made_from(seen)
             notes: list = []
             merged = self._mended(merge3(base, self.document, found, notes), notes, base)
             self.on_disk = found
-            self.recent.append((_dumps(found), False))
+            self.recent.append((seen, False, old))
             self.disk_text = text
             self.exists = True
             # Changed on disk by something the studio doesn't know (an editor, a script):
@@ -536,9 +549,40 @@ class Doc:
             unsaved = self.saved < self.version
             self._become(merged, who, "", news=not opened)
             self._tell(notes, who, "", None)
-            if not unsaved and _dumps(merged) == _dumps(found):
+            alike = _dumps(merged) == seen
+            if old and not alike:
+                # An old copy, merged with what was saved since: the file holds less than
+                # the document, and is written again.
+                self.saved = min(self.saved, self.version - 1)
+            elif not unsaved and alike:
                 self.saved = self.version
             return "changed"
+
+    def _made_from(self, seen: str) -> tuple[Any, bool]:
+        """The version a change made to the file elsewhere (``seen``: what it holds now, as
+        ``_dumps``) is taken in from, and whether it is older than what the file last held.
+
+        A writer that read the file a while ago and writes back the whole of what it read with
+        its change (an agent's whole-file write, a script, an editor holding it open) made its
+        change from what it read, and undid nothing saved since: it is taken in from that --
+        of what the file held the last times the studio read or wrote it, the version its
+        words are nearest (``flexo.studio.nearness``; the latest of those as near, so a change
+        made from the latest is taken in from it). Word for word what the file held before,
+        it is that version put back (an undo, ``git checkout``, Time Machine): taken in from
+        the latest, as it is -- but for a writer's old copy written again, which brings
+        nothing new."""
+
+        # (The file last held what the studio last read or wrote: ``on_disk``, kept last.)
+        texts = [text for text, *_ in reversed(self.recent)] or [_dumps(self.on_disk)]
+        if seen == texts[0]:
+            return self.on_disk, False
+        for text, _, old in reversed(self.recent):
+            if text == seen:
+                return (json.loads(text), True) if old else (self.on_disk, False)
+        found = nearness.nearest(texts, seen)
+        if found is None or found is texts[0]:
+            return self.on_disk, False
+        return json.loads(found), True
 
 
     def take_conflict(self, copy_path: Path, service: str) -> bool:
@@ -583,17 +627,16 @@ class Doc:
         copy's words)."""
 
         kept = list(self.recent)
-        mine = [at for at, (text, wrote) in enumerate(kept) if wrote and text == theirs]
+        mine = [at for at, (text, wrote, _) in enumerate(kept) if wrote and text == theirs]
         if mine:
             kept, aim = kept[: mine[-1]], now
         else:
             aim = theirs
         if not kept:
             return None
-        aimed = _lines(aim)
         # (The latest of those alike: the nearer they parted.)
-        text, _ = max(reversed(kept), key=lambda entry: _likeness(_lines(entry[0]), aimed))
-        return json.loads(text)
+        text = nearness.nearest([text for text, *_ in reversed(kept)], aim)
+        return json.loads(text) if text is not None else None
 
 
 class Workspace:
@@ -1170,6 +1213,19 @@ class Workspace:
             if doc.problem != said or wrote:
                 self.broadcast(doc.said())
             self.open(doc.name)
+
+    def merging(self, path: Path) -> None:
+        """The file at ``path`` is about to be written with a change made to it as it is now
+        (a bundle saved on another computer, merged with it: flexo.studio.bundles): its
+        document takes the change in from what the studio last read or wrote of it -- not
+        from the version the change is nearest, as it takes in one made elsewhere
+        (``Doc._made_from``): there, another computer's undoing an edit made here is its
+        change, not a sign it was made from before the edit."""
+
+        with self.lock:
+            doc = next((doc for doc in self.docs.values() if _same(doc.path, path)), None)
+        if doc is not None:
+            doc.told = _words(path)
 
     # -- changes --
 
@@ -2053,20 +2109,6 @@ def _same_document(one: Any, other: Any) -> bool:
 
     mine, theirs = identity(one), identity(other)
     return mine is None or theirs is None or mine == theirs
-
-
-def _lines(text: str) -> list[str]:
-    """A document (as ``_dumps``) a line to each value, to be compared (``_likeness``)."""
-
-    return json.dumps(json.loads(text), sort_keys=True, indent=0, ensure_ascii=False).splitlines()
-
-
-def _likeness(one: list[str], other: list[str]) -> float:
-    """How alike two documents' lines (``_lines``) are, from 0 to 1."""
-
-    import difflib
-
-    return difflib.SequenceMatcher(None, one, other, autojunk=False).ratio()
 
 
 def set_aside(path: Path) -> bool:
