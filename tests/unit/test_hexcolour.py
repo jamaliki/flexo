@@ -357,3 +357,62 @@ def test_shapes_chosen_are_offered_by_the_colours_they_are_seen_by() -> None:
     assert fill == ["set", {"fill": "#ff7f0e", "fill_opacity": 0.8}, "Change Fill"]
     assert colour == ["set", {"line": "#2ca02c"}, "Change Line"]
     assert made["typing"] is None
+
+
+def test_the_theme_colours_a_colour_takes_by_name_go_with_it_shared_where_several_are() -> None:
+    """A colour taken from the screen in a theme's colour is given by its name to a thing that
+    takes it so (⇧⌘C's eyedropper, Pick Colour…): each choice says which names it takes --
+    those every kind coloured together takes, where several are."""
+
+    made = run("""
+      const accent = { value: "accent", colour: "#1a5d9b" };
+      const muted = { value: "muted", colour: "#6b6570" };
+      const tint = { value: "accent-fill", colour: "#dbebfd" };
+      const colour = (name, offered) => ({ name, offered, set: () => {} });
+      const words = { noun: "Text", colours: [colour("Text", [accent, muted])] };
+      const shapes = { noun: "Shape",
+        colours: [colour("Fill", [tint, accent]), colour("Text", [accent])] };
+      const bare = { noun: "Part", colours: [{ name: "Fill", set: () => {} }] };
+      const names = (list) =>
+        list.map((choice) => [choice.name, choice.offered.map((item) => item.value)]);
+      return { one: names(C.colourChoices([shapes])), both: names(C.colourChoices([words, shapes])),
+        bare: names(C.colourChoices([bare])) };
+    """)
+    assert made == {
+        "one": [["Fill", ["accent-fill", "accent"]], ["Text", ["accent"]]],
+        "both": [["Both", ["accent"]], ["Text", ["accent"]], ["Fill", ["accent-fill", "accent"]]],
+        "bare": [["Fill", []]],
+    }
+
+
+def test_shapes_take_the_theme_colours_their_panel_offers_by_name() -> None:
+    made = run("""
+      const S = await import(SHAPES);
+      const roles = { "tone-1-fill": "#dbebfd", "tone-1-stroke": "#1a5d9b",
+        "tone-2-fill": "#fee4ce", "tone-2-stroke": "#824c0d", "block-fill": "#f1eff4",
+        canvas: "#ffffff", "muted-ink": "#6b6570", ink: "#242126" };
+      const box = { kind: "rectangle", at: [0, 0], size: [10, 10] };
+      const kind = S.shapeColours({ typing: () => false, specs: () => [box],
+        roles: () => roles, set: () => {} });
+      const named = (list) => list.map((item) => `${item.value} ${item.colour}`);
+      return { fill: named(S.paintNames(roles, "fill")), line: named(S.paintNames(roles, "line")),
+        offered: kind.colours.map((colour) => [colour.name, colour.offered.length]) };
+    """)
+    assert made["fill"] == [
+        "accent-fill #dbebfd",
+        "accent2-fill #fee4ce",
+        "accent #1a5d9b",
+        "accent2 #824c0d",
+        "grey #f1eff4",
+        "paper #ffffff",
+        "muted #6b6570",
+        "ink #242126",
+    ]
+    assert made["line"] == [
+        "accent #1a5d9b",
+        "accent2 #824c0d",
+        "muted #6b6570",
+        "ink #242126",
+        "paper #ffffff",
+    ]
+    assert made["offered"] == [["Fill", 8], ["Outline", 5], ["Text", 5]]

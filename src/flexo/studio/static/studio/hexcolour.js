@@ -223,16 +223,22 @@ export function applyColour(apply, hex, alpha = null) {
 
 // -- what is chosen, by its colours ----------------------------------------------------------
 
-// The colours of what is chosen, as the popover offers them: [{ name, said, value, set }],
-// the one ⇧⌘C colours first.
+// The colours of what is chosen, as the popover offers them: [{ name, said, value, set,
+// offered }], the one ⇧⌘C colours first -- `offered`, the theme's colours each takes by name
+// (those all of them take, where several are coloured together).
 export function colourChoices(kinds) {
   const each = (kinds || []).filter((kind) => kind?.colours?.length);
   if (!each.length) return [];
   const mainOf = (kind) => kind.colours[Math.min(Math.max(0, kind.main || 0), kind.colours.length - 1)];
   const same = (values) => (values.every((value) => value === values[0]) ? values[0] : undefined);
+  const named = (item) => `${item?.value}|${String(item?.colour || "").toLowerCase()}`;
+  const offeredBy = (colours) => {
+    const lists = colours.map((colour) => colour.offered || []);
+    return lists[0].filter((item) => lists.every((list) => list.some((other) => named(other) === named(item))));
+  };
   if (each.length === 1) {
     const [kind] = each, main = mainOf(kind);
-    return [main, ...kind.colours.filter((colour) => colour !== main)].map((colour) => ({ name: colour.name, said: `${colour.name} of ${kind.noun}`, value: colour.value, set: colour.set }));
+    return [main, ...kind.colours.filter((colour) => colour !== main)].map((colour) => ({ name: colour.name, said: `${colour.name} of ${kind.noun}`, value: colour.value, set: colour.set, offered: colour.offered || [] }));
   }
   const nouns = (list) => list.map((kind) => kind.noun).join(" and ");
   const names = [...new Set([...each.map((kind) => mainOf(kind).name), ...each.flatMap((kind) => kind.colours.map((colour) => colour.name))])];
@@ -240,14 +246,14 @@ export function colourChoices(kinds) {
     const having = each.filter((kind) => kind.colours.some((colour) => colour.name === name));
     const colours = having.map((kind) => kind.colours.find((colour) => colour.name === name));
     return { name, said: `${name} of ${nouns(having)}`, value: same(colours.map((colour) => colour.value)),
-      set: (hex, alpha) => colours.forEach((colour) => colour.set(hex, alpha)) };
+      set: (hex, alpha) => colours.forEach((colour) => colour.set(hex, alpha)), offered: offeredBy(colours) };
   });
   const mains = each.map(mainOf);
   // Each kind's own first -- or, where they are the same colour by name (a text's words and a
   // text box's), that one.
   if (mains.every((colour) => colour.name === mains[0].name)) return byName;
   return [{ name: "Both", said: each.map((kind) => `${mainOf(kind).name} of ${kind.noun}`).join(", "), value: same(mains.map((colour) => colour.value)),
-    set: (hex, alpha) => mains.forEach((colour) => colour.set(hex, alpha)) }, ...byName];
+    set: (hex, alpha) => mains.forEach((colour) => colour.set(hex, alpha)), offered: offeredBy(mains) }, ...byName];
 }
 
 // The box on the screen round `nodes` (elements; none drawn: null).
