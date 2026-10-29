@@ -310,7 +310,7 @@ export class AssistantPanel {
 }
 
 function stepIcon(name) {
-  return { edit_document: "pencil", write_document: "pencil", look: "eye", read_document: "file", open_document: "file", list_documents: "folder", status: "info" }[name] || "check";
+  return { edit_document: "pencil", write_document: "pencil", look: "eye", read_document: "file", open_document: "file", list_documents: "folder", status: "info", outline: "list", guide: "info" }[name] || "check";
 }
 
 // A little markdown: paragraphs, lists, **strong**, *emphasis*, `code`. Text is

@@ -11,16 +11,14 @@ Each tool returns content blocks in the Messages API's shape: ``text`` and
 
 from __future__ import annotations
 
-import base64
 import inspect
 from typing import Any
 
 import yaml
 
+from flexo.studio import agent_guides, agent_look, agent_read, agent_report
+from flexo.studio.agent_look import MAX_LOOK, MAX_SHEET
 from flexo.studio.workspace import Workspace
-
-MAX_LOOK = 4
-"""Pages drawn per call to ``look``."""
 
 TOOLS: list[dict[str, Any]] = [
     {
@@ -56,7 +54,31 @@ TOOLS: list[dict[str, Any]] = [
         "name": "read_document",
         "description": (
             "The document's current text (as YAML, exactly as edit_document matches it) and "
-            "version. People may have changed it since you last read it."
+            "version. People may have changed it since you last read it. For a deck, `slides` "
+            "reads just those slides (1 is the first), line for line as the whole text has them."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file": {"type": "string"},
+                "slides": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "For a deck: the slides to read, by number.",
+                },
+            },
+            "required": ["file"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "outline",
+        "description": (
+            "A document in brief, a line a page: for a deck, each slide's number, title, "
+            "layout, objects, build steps, TODOs and warnings; for a figure, its parts, lines "
+            "and shapes, and its warnings. Says what each person in the studio has selected, as "
+            "a path in the YAML -- what \"this\" means in a request. Start here, then read "
+            "only the slides you need."
         ),
         "input_schema": {
             "type": "object",
@@ -103,15 +125,41 @@ TOOLS: list[dict[str, Any]] = [
         "description": (
             "Draw pages of a document and return them as pictures, with every warning the "
             "drawing gives -- look after changing something, to see what it looks like. For a "
-            f"deck, `pages` are slide numbers (1 is the first); at most {MAX_LOOK} per call."
+            f"deck, `pages` are slide numbers (1 is the first); at most {MAX_LOOK} per call. "
+            f"`sheet` tiles up to {MAX_SHEET} pages, small and numbered, in one picture: a "
+            "talk's consistency at a glance. `annotate` outlines each object, shape and figure "
+            "part with its path in the YAML or its id, and lists where each is. `step` draws a "
+            "slide as it stands at that build step (1: as it first appears, before any click)."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "file": {"type": "string"},
                 "pages": {"type": "array", "items": {"type": "integer"}},
+                "sheet": {"type": "boolean"},
+                "annotate": {"type": "boolean"},
+                "step": {"type": "integer"},
             },
             "required": ["file"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "guide",
+        "description": (
+            "How to write one thing in a deck or a figure (shapes, insets, figures, structures, "
+            "builds, ...), with examples that draw as they are. With no topic, lists the topics "
+            "of each kind of document; `reference` is a kind's whole guide."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "topic": {"type": "string"},
+                "kind": {
+                    "type": "string",
+                    "description": "deck, figure or theme, where a topic is in more than one.",
+                },
+            },
             "additionalProperties": False,
         },
     },
@@ -175,7 +223,11 @@ rather than change the figure or picture under them. To mark up a figure itself,
 shown, draw them in the figure's own shapes, attached to the parts they point at, ring or label \
 (on, around, an end's {part: id}), so they follow the parts as the figure is laid out again. A \
 figure for a deck is written inside the deck (its guide says how), not as a figure file of its \
-own, unless the user asks for a file."""
+own, unless the user asks for a file. Start with outline: it names each slide or part, its \
+warnings, and what the user has selected; read only the slides you need. guide(topic) teaches \
+one thing at a time, with examples. An edit's reply says what it changed and deleted, and what \
+to look at next: look once, and stop when nothing is warned of and it reads as meant. Where valid \
+YAML is laid out badly, tell the user it is a Flexo bug rather than nudging places and sizes."""
 
 
 class Tools:
@@ -223,7 +275,9 @@ class Tools:
                 where = f", {_where(entry.get('where'))}" if entry.get("where") else ""
                 name = entry["who"].get("name") or ""
                 who = "Someone in the studio" if name in {"", "You"} else name
-                lines.append(f"{who} is looking at {entry['file']}{where}.")
+                chosen = agent_read.chosen(workspace, entry)
+                chosen = f"; selected: {chosen}" if chosen else ""
+                lines.append(f"{who} is looking at {entry['file']}{where}{chosen}.")
         return [_text("\n".join(lines))]
 
     def _open_document(self, file: str, kind: str | None = None) -> list[dict[str, Any]]:
@@ -241,14 +295,15 @@ class Tools:
         workspace.set_presence(self.who, doc.name, None, None)
         blocks = []
         if doc.kind.name not in self.guided:
-            guide = getattr(doc.kind, "guide", None)
+            # The kind's brief, its guide's topics a call away -- or its whole guide.
+            guide = getattr(doc.kind, "brief", None) or getattr(doc.kind, "guide", None)
             if guide:
                 blocks.append(_text(guide()))
             self.guided.add(doc.kind.name)
         blocks.extend(self._read_document(doc.name))
         return blocks
 
-    def _read_document(self, file: str) -> list[dict[str, Any]]:
+    def _read_document(self, file: str, slides: list[int] | None = None) -> list[dict[str, Any]]:
         doc = self.workspace.open(file)
         with doc.lock:
             text, version = _dump(doc.kind, doc.document), doc.version
@@ -256,7 +311,15 @@ class Tools:
             if doc.unread and doc.source() is not None:
                 text = doc.source()
         problem = f"\nNote: {doc.problem}" if doc.problem else ""
+        if slides and not doc.unread:
+            return [_text(agent_read.slides_of(doc, text, version, slides) + problem)]
         return [_text(f"{doc.name} ({doc.kind.name}), version {version}:{problem}\n\n{text}")]
+
+    def _outline(self, file: str) -> list[dict[str, Any]]:
+        return [_text(agent_read.outline(self.workspace, self.who, file))]
+
+    def _guide(self, topic: str | None = None, kind: str | None = None) -> list[dict[str, Any]]:
+        return [_text(agent_guides.answer(self.workspace.kinds, topic, kind, self.guided))]
 
     def _edit_document(
         self, file: str, old: str, new: str, replace_all: bool = False
@@ -298,6 +361,7 @@ class Tools:
             ) from None
         check = getattr(doc.kind, "check", None)
         problems = check(document, doc.path.parent) if check else []
+        before = doc.base(version)  # (what the change was made from: said against it)
         new_version, _ = doc.update(document, version, self.who)
         lines = [f"Changed {doc.name}: now version {new_version}."]
         if new_version == version:
@@ -305,51 +369,20 @@ class Tools:
         if problems:
             lines.append("Problems:")
             lines.extend(f"- {problem}" for problem in problems)
+        if new_version != version and before is not None:
+            # What it did (and deleted), and what to look at next and when to stop.
+            lines.extend(agent_report.lines(doc.kind, before, document, problems))
         return [_text("\n".join(lines))]
 
-    def _look(self, file: str, pages: list[int] | None = None) -> list[dict[str, Any]]:
-        from flexo.export import rasterise
-        from flexo.portable import portable_svg
-
-        doc = self.workspace.open(file)
-        self.workspace.set_presence(self.who, doc.name, {"page": (pages or [1])[0]}, None)
-        drawing = self.workspace.drawing_of(doc.name, {"focus": (pages or [1])[0] - 1})
-        wanted = pages or list(range(1, min(len(drawing.pages), MAX_LOOK) + 1))
-        blocks: list[dict[str, Any]] = []
-        for number in wanted[:MAX_LOOK]:
-            if not 1 <= number <= len(drawing.pages):
-                blocks.append(
-                    _text(f"There is no page {number}; {doc.name} has {len(drawing.pages)}.")
-                )
-                continue
-            page = drawing.pages[number - 1]
-            if not page.svg:
-                continue
-            png = rasterise(portable_svg(page.svg), dpi=72)
-            blocks.append(_text(f"Page {number} ({page.label or page.id}):"))
-            blocks.append(
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/png",
-                        "data": base64.b64encode(png).decode("ascii"),
-                    },
-                }
-            )
-        messages = [message for message in drawing.messages if message.severity != "note"]
-        notes = [message for message in drawing.messages if message.severity == "note"]
-        summary = [f"{doc.name}: {len(drawing.pages)} page(s)."]
-        if len(wanted) > MAX_LOOK:
-            summary.append(f"Showing the first {MAX_LOOK} asked for.")
-        for message in messages[:30]:
-            place = f" [{message.page or message.where}]" if (message.page or message.where) else ""
-            summary.append(f"{message.severity}{place}: {message.text}")
-        for message in notes[:10]:
-            summary.append(f"note: {message.text}")
-        if not messages:
-            summary.append("No warnings.")
-        return [*blocks, _text("\n".join(summary))]
+    def _look(
+        self,
+        file: str,
+        pages: list[int] | None = None,
+        sheet: bool = False,
+        annotate: bool = False,
+        step: int | None = None,
+    ) -> list[dict[str, Any]]:
+        return agent_look.look(self.workspace, self.who, file, pages, sheet, annotate, step)
 
     def _convert_to_figure_parts(
         self, file: str, shapes: list[str | int] | None = None, slide: int | None = None
