@@ -492,6 +492,8 @@ export class Session {
 
   travelled(entry) {
     this.lastMerge = null;
+    // (An agent's turn undone here, undone or made again: its row is told -- turns.js.)
+    if (entry.turn) this.emit("turn", entry);
     this.emit("change", { quiet: false, source: "history", entry: this.said(entry) });
     // (Sent and drawn in one request, where it can be when it goes: the studio draws what it
     // keeps.)

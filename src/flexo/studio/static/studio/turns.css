@@ -1,0 +1,13 @@
+/* An agent's turn in the activity (turns.js): a row as the others are, its words a button that
+   goes where it last worked, and Undo under its time. Undone, it is greyed and says so. */
+
+.turn-row { cursor: default; }
+.turn-row .turn-go { display: block; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.turn-row .turn-done { color: var(--ink-2); font-size: 12px; }
+.turn-row .turn-side { display: grid; justify-items: end; gap: 4px; }
+.turn-row .turn-side .btn.small { height: 22px; padding: 0 8px; }
+.turn-row .turn-undone { color: var(--ink-3); font-size: 11px; white-space: nowrap; }
+.turn-row.undone .activity-text, .turn-row.undone .turn-done { color: var(--ink-3); }
+.turn-row.undone .activity-text b { color: var(--ink-2); }
+.turn-row .btn.small:not(:hover):not(:focus-visible) { opacity: 0.75; }
+.turn-row:hover .btn.small { opacity: 1; }

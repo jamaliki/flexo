@@ -15,6 +15,8 @@ import { findKeys, chosenWords } from "./findbar.js";
 import { helpBar, helpCommand, onHelp } from "./helpbar.js";
 import { chords } from "./helpkeys.js";
 import { ACCEPT as FRAMED, answered } from "./framed.js";
+import { turnRow, turns as agentTurns } from "./turns.js";
+import { CommentList } from "./commentlist.js";
 
 const SETTINGS = window.STUDIO || { token: "", file: "" };
 const KIND_ICONS = { deck: "deck", figure: "figure", theme: "theme" };
@@ -548,6 +550,8 @@ export async function start() {
   const workspace = new Workspace(info);
   window.flexoStudio = workspace;
   bundles(workspace);
+  // Agents' turns, each a row of the activity, undone from it (turns.js).
+  workspace.turns = agentTurns(workspace, { nameOf });
   // Settled once the tabs open when the page was last left are open again: what an app
   // around the page asks (open this document) waits for it, rather than being undone.
   let settled;
@@ -1623,6 +1627,9 @@ const SHORTCUTS = [
   ["Slides", [["⇧ ⌘ N", "New Slide"], ["↑ ↓ PgUp PgDn", "Previous or Next Slide"], ["Home End", "First or Last Slide"],
     ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ P", "Play Slideshow", "app"], ["⌥ ⌘ ↩", "Play from Start"],
     ["⌘ + −", "Zoom In or Out (or Pinch, or ⌘-Scroll)"], ["⌘ 0", "Actual Size"], ["⇧ ⌘ 0", "Fit Slide"]]],
+  // Review notes on a deck's slides, objects and figures' parts (flexo-talk's comments.js).
+  ["Comments", [["⇧ ⌘ K", "Add a Comment on What Is Chosen: a Figure’s Part, an Object, Else the Slide"], ["↩", "Send a Comment or a Reply (⇧↩: New Line)"],
+    ["Esc", "Close the Comment"]]],
   // A deck's slides overlaid on the one shown (flexo-talk's across.js).
   ["Overlaying Slides", [["O", "Overlay the Slides Chosen in the List (One Chosen: Those Either Side), or Stop"], ["⇞ ⇟", "Previous or Next Overlaid Slide"],
     ["Click", "An Overlaid Slide’s Object: Go to Its Slide and Select It"], ["⌘ Drag", "Without Catching at What Is Overlaid (Snapping Off: With It)"],
@@ -1711,6 +1718,8 @@ class SidePanel {
       ui.button("", () => this.hide(), { kind: "ghost", icon: "close", small: true, title: "Close" })), this.body);
     this.activityList = h("div.activity-list.scroll-thin");
     workspace.on("activity", () => { if (this.open === "activity") this.renderActivity(); });
+    // A document's comments, to work through (commentlist.js).
+    this.comments = new CommentList(workspace, { avatar });
   }
 
   toggle(which) { if (this.open === which) this.hide(); else this.show(which); }
@@ -1721,8 +1730,11 @@ class SidePanel {
     this.node.hidden = false;
     clear(this.tabs,
       h(`button.side-tab${which === "assistant" ? ".on" : ""}`, { type: "button", onclick: () => this.show("assistant") }, icon("sparkle"), "Assistant"),
-      h(`button.side-tab${which === "activity" ? ".on" : ""}`, { type: "button", onclick: () => this.show("activity") }, icon("activity"), "Activity"));
+      h(`button.side-tab${which === "activity" ? ".on" : ""}`, { type: "button", onclick: () => this.show("activity") }, icon("activity"), "Activity"),
+      h(`button.side-tab${which === "comments" ? ".on" : ""}`, { type: "button", onclick: () => this.show("comments") }, icon("comment"), "Comments"));
+    if (which !== "comments") this.comments.hide();
     if (which === "assistant") { clear(this.body, this.assistant.node); this.assistant.focus(); }
+    else if (which === "comments") { clear(this.body, this.comments.node); this.comments.show(); }
     else { this.workspace.unseen = 0; this.workspace.emit("activity"); this.renderActivity(); clear(this.body, this.activityList); }
     document.body.classList.toggle("side-open", true);
     this.workspace.emit("side");
@@ -1730,6 +1742,7 @@ class SidePanel {
 
   hide() {
     if (this.node.contains(document.activeElement)) this.assistant.giveBack();
+    this.comments.hide();
     this.open = null;
     remember("side", "");
     this.node.hidden = true;
@@ -1738,8 +1751,9 @@ class SidePanel {
   }
 
   renderActivity() {
-    const entries = [...this.workspace.activity].reverse();
-    clear(this.activityList, entries.length ? entries.map((entry) => h("button.activity-row", { type: "button", onclick: () => this.workspace.goTo(entry.file, entry.where) },
+    // (The latest first: an agent's turn, its row said again as it goes on, where it now is.)
+    const entries = [...this.workspace.activity].reverse().sort((a, b) => b.at - a.at);
+    clear(this.activityList, entries.length ? entries.map((entry) => entry.turn ? turnRow(this.workspace, entry, { avatar, nameOf, ago, docName }) : h("button.activity-row", { type: "button", onclick: () => this.workspace.goTo(entry.file, entry.where) },
       avatar(entry.who, { size: 22 }),
       // Who did what, and how many times, one sentence; where, under it.
       h("span.activity-text", {}, h("span", {}, h("b", {}, nameOf(entry.who)), " ", entry.text, entry.count > 1 ? h("span.times", {}, `\u00a0×${entry.count}`) : null),
@@ -1779,6 +1793,7 @@ export function palette(workspace) {
     ...(session ? [
       { icon: "undo", label: "Undo", keys: "⌘Z", disabled: !session.past.length, hint: session.past.length ? session.said(session.past[session.past.length - 1]).text : "Nothing to undo", run: () => workspace.command("undo") },
       { icon: "redo", label: "Redo", keys: "⇧⌘Z", disabled: !session.future.length, hint: session.future.length ? session.said(session.future[session.future.length - 1]).text : "Nothing to redo", run: () => workspace.command("redo") },
+      ...(workspace.turns?.commands(session) || []),
       { icon: "history", label: "Show History", keys: "⌥⌘Z", disabled: !session.past.length && !session.future.length, hint: session.past.length || session.future.length ? "" : "No changes yet", run: () => workspace.command("history") },
     ] : []),
     // The document itself, as the File menu has it.

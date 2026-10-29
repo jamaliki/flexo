@@ -324,6 +324,12 @@ class Handler(BaseHTTPRequestHandler):
             from flexo.studio import theming
 
             self._json({"documents": theming.uses(workspace, _one(query, "file"))})
+        elif route == "/api/turn":
+            # An agent's turn, to be undone by the page: its runs in the file (flexo.studio.turns).
+            from flexo.studio import turns
+
+            body = turns.of(workspace).runs(_one(query, "id"), _one(query, "file"))
+            self._reply(200, body, "application/json")
         elif route == "/api/agent/tools":
             from flexo.studio.agent import TOOLS
 
@@ -531,6 +537,12 @@ class Handler(BaseHTTPRequestHandler):
                 file, client = str(data.get("file") or ""), str(data.get("client") or "")
                 said = {"type": "merged", "file": file, "client": client, "notes": notes}
                 workspace.broadcast(said)
+            self._json({"ok": True})
+        elif route == "/api/turn/undone":
+            # An agent's turn undone from the page (or made again by its undo): its row says so.
+            from flexo.studio import turns
+
+            turns.of(workspace).undo(str(data.get("id") or ""), who, bool(data.get("undone", True)))
             self._json({"ok": True})
         elif route == "/api/agent/call":
             tools = _agent_tools(workspace, data.get("who") or {})

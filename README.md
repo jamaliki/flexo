@@ -1527,7 +1527,12 @@ an agent touches flash in its colour, its avatar and what it is doing ("Tighteni
 slide 4") show where it works, the activity list says who changed what, and
 **Follow** keeps the view on whatever an agent is changing. Undo takes back your
 own last change and leaves others' alone; the history beside it (⌥⌘Z) lists your
-changes in words, to go back or forward to any of them.
+changes in words, to go back or forward to any of them. What an agent does for one
+request -- Claude's in the side panel, or Claude Code's, its edits each given the
+request's `label` -- is one row of the activity, named as it names it ("Claude Code:
+Add a results slide") with what it did under that, and **Undo** there takes the whole of
+it back as one change of yours (⌘Z makes it again), keeping what you or anyone changed
+meanwhile and since; the palette offers it for the document shown too.
 
 - **Design** in a figure's toolbar (⇧⌘D, View › Show Design in the Mac app) shows its
   Design bar, as a deck's: one low row of pop-up buttons naming what is in use -- **Theme** (a
