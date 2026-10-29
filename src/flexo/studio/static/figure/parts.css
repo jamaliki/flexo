@@ -69,6 +69,8 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 /* A shape's outline at the size it is being dragged to: solid once it fits its words. */
 .fig-size-drag rect, .fig-size-drag polygon, .fig-size-drag ellipse { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; }
 .fig-size-drag .fits { stroke-dasharray: none; }
+/* A size it catches at, another part's: a bar along each part that size (sizelike.js). */
+.fig-size-drag .shape-size line { stroke: #1c7ed6; stroke-dasharray: none; }
 .fig-text-preview { position: absolute; z-index: 2; pointer-events: none; line-height: 1.22; text-align: center; white-space: pre; }
 /* The guide a curve's middle keeps to, as the slide's alignment guides are drawn. */
 .fig-end-drag .fig-guides line { stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.9; }

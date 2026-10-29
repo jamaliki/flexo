@@ -17,8 +17,10 @@
 // - A grid: rows and columns, each column as wide as its widest, each row as tall as its
 //   tallest, a gap between, each shape set in its cell as asked; in the order they read.
 // - Equal spacing while one is dragged: where it sits as far from its neighbours as they are
-//   from theirs, or as two others in its row or column are apart (`spacing`); and while one is
-//   sized or drawn, where the edge that moves is as far from its neighbour (`sizeCatch`).
+//   from theirs, or as two others in its row or column are apart (`spacing`) -- a backdrop
+//   round it (a panel it is on) no neighbour of it; and while one is sized or drawn, where the
+//   edge that moves is as far from its neighbour, or where it is as wide (or as tall) as
+//   another (`sizeCatch`).
 //
 // What the person last chose -- what to align to, whether to move them as a group, the gap --
 // is one setting for the person, changed at any time, shapes chosen or not: kept in this
@@ -26,6 +28,8 @@
 // tab of it, turned here too; in the Mac app, whose windows each have their own storage, the
 // app keeps it for them all and tells the others (aligntools.js's aligningInApp). No page is
 // needed: it is read in Node as it is in the studio.
+
+import { sizesOf, sizeAt, sameSize } from "./snapping.js";
 
 const KEYS = { to: "flexo-studio-align-to", group: "flexo-studio-align-group", gap: "flexo-studio-align-gap" };
 
@@ -300,24 +304,52 @@ export function gridMoves(items, { rows = 0, columns = 0, gap: across = 0, gapDo
 export function spacing(boxes) {
   const list = boxes.filter(usable);
   const pairs = [neighbours(list, 0), neighbours(list, 1)];
+  // A box that encloses the one dragged, along its row (a panel behind it, words as wide as
+  // the slide) is a backdrop, not a neighbour: its gaps are left out of the row, and the
+  // neighbours either side of it are each other's (made once for each such, as they come).
+  const without = new Map();
+  const pairsFor = (axis, around) => {
+    if (!around?.length) return pairs[axis];
+    const key = `${axis} ${around.join(" ")}`;
+    let found = without.get(key);
+    if (!found) {
+      if (without.size > 16) without.clear();
+      found = neighbours(list, axis, new Set(around));
+      without.set(key, found);
+    }
+    return found;
+  };
+  const sizes = sizesOf(list);
   return {
     boxes: list,
     pairs,
     caught(box, reach, ways = {}) {
       const near = narrowed(reach);
-      return { x: ways.x === false ? null : nearest(list, pairs[0], 0, box, near), y: ways.y === false ? null : nearest(list, pairs[1], 1, box, near) };
+      return { x: ways.x === false ? null : nearest(list, pairsFor, 0, box, near), y: ways.y === false ? null : nearest(list, pairsFor, 1, box, near) };
     },
     // While one is sized, or drawn: its edge on `side` ("start" or "end") along `axis` (0
     // across, 1 down), the other staying, caught within `reach` where the gap to its neighbour
     // that way is one its row (or column) has -- as wide as two others there are apart, or as
     // its own gap the other way. As `caught` says it (`shift`: how far that edge moves).
     edge(box, axis, side, reach) {
-      return usable(box) ? nearestEdge(list, pairs[axis], axis, box, side, narrowed(reach)) : null;
+      return usable(box) ? nearestEdge(list, pairsFor, axis, box, side, narrowed(reach)) : null;
+    },
+    // And where it is as wide (or as tall) as another: its edge at `at` along `axis`, the other
+    // at `fixed`, caught within `reach` -- how far it moves (`shift`) and the size.
+    size(axis, at, fixed, reach) {
+      const found = sizeAt(at, fixed, sizes[axis], reach);
+      return found ? { axis, ...found } : null;
     },
     // The gaps to show for a catch (`found`, one way), the box dragged now `box`: its own, and
     // every one of its row's (or column's) as wide.
     marks(found, box, slack = 0.05) {
-      return found ? marksOf(list, pairs[found.axis], found, box, slack) : [];
+      return found ? marksOf(list, pairsFor(found.axis, found.around), found, box, slack) : [];
+    },
+    // The sizes to show for a size caught (`found`, one way): the box sized (`box`, as it is
+    // made) and every other as wide (or tall) -- if it is that size still.
+    sized(found, box, slack = 0.05) {
+      if (!found || !usable(box) || Math.abs(box[found.axis + 2] - box[found.axis] - found.size) > slack) return [];
+      return [box, ...sameSize(list, found.size, found.axis, slack)].map((each) => ({ axis: found.axis, box: each, size: found.size }));
     },
   };
 }
@@ -349,12 +381,12 @@ function gapsNear(list, pairs, row, axis, box, before, after, reach) {
 const level = (a, b, axis) => { const o = 1 - axis; return a[o] < b[o + 2] && a[o + 2] > b[o]; };
 
 // Each box's nearest neighbour after it along `axis`, of those it overlaps the other way: the
-// gaps between them ({ a, b, size }), each box's to the next.
-function neighbours(list, axis) {
-  const order = list.map((_, n) => n).sort((m, n) => list[m][axis] - list[n][axis]);
+// gaps between them ({ a, b, size }), each box's to the next -- but those in `skip`.
+function neighbours(list, axis, skip = null) {
+  const order = list.map((_, n) => n).filter((n) => !skip?.has(n)).sort((m, n) => list[m][axis] - list[n][axis]);
   const starts = order.map((n) => list[n][axis]);
   const out = [];
-  for (let a = 0; a < list.length; a++) {
+  for (const a of order) {
     const end = list[a][axis + 2];
     // (The first that starts at or after its end, by halving; then on to the first level with it.)
     let low = 0, high = order.length;
@@ -372,26 +404,29 @@ function neighbours(list, axis) {
 // The nearest place along `axis` within `reach` of `box`'s where it is evenly spaced, if any:
 // how far it moves (`shift`), the spacing (`size`), and its neighbours either side.
 // Of those in `box`'s row (or column, down), level with it, its nearest neighbour before it and
-// after it along `axis` (-1: none), and which are in the row (`row[n]`). One look at each.
+// after it along `axis` (-1: none), which are in the row (`row[n]`), and those round it -- its
+// backdrops, left out of the row (`around`). One look at each.
 function beside(list, axis, box, reach) {
   const start = box[axis], end = box[axis + 2], middle = (start + end) / 2;
   let before = -1, after = -1;
-  const row = new Uint8Array(list.length);
+  const row = new Uint8Array(list.length), around = [];
   for (let n = 0; n < list.length; n++) {
     const other = list[n];
     if (!level(other, box, axis)) continue;
+    if (other[axis] <= start + 1e-6 && other[axis + 2] >= end - 1e-6) { around.push(n); continue; }
     row[n] = 1;
     const centre = (other[axis] + other[axis + 2]) / 2;
     if (other[axis + 2] <= start + reach && centre < middle) { if (before < 0 || other[axis + 2] > list[before][axis + 2]) before = n; }
     else if (other[axis] >= end - reach && centre > middle) { if (after < 0 || other[axis] < list[after][axis]) after = n; }
   }
-  return { before, after, row };
+  return { before, after, row, around };
 }
 
-function nearest(list, pairs, axis, box, reach) {
+function nearest(list, pairsFor, axis, box, reach) {
   const start = box[axis], end = box[axis + 2], size = end - start;
-  const { before, after, row } = beside(list, axis, box, reach);
+  const { before, after, row, around } = beside(list, axis, box, reach);
   if (before < 0 && after < 0) return null;
+  const pairs = pairsFor(axis, around);
   const low = before >= 0 ? list[before][axis + 2] : -Infinity, high = after >= 0 ? list[after][axis] : Infinity;
   let best = null;
   const consider = (at, spacingSize) => {
@@ -399,7 +434,7 @@ function nearest(list, pairs, axis, box, reach) {
     if (Math.abs(shift) > reach || spacingSize < 0) return;
     // (Never over its neighbour on the other side.)
     if (at < low - 1e-6 || at + size > high + 1e-6) return;
-    if (!best || Math.abs(shift) < Math.abs(best.shift) - 1e-9) best = { axis, shift, size: spacingSize, before, after };
+    if (!best || Math.abs(shift) < Math.abs(best.shift) - 1e-9) best = { axis, shift, size: spacingSize, before, after, ...(around.length ? { around } : {}) };
   };
   // Midway between its neighbours.
   if (before >= 0 && after >= 0) consider((low + high - size) / 2, (high - low - size) / 2);
@@ -414,11 +449,12 @@ function nearest(list, pairs, axis, box, reach) {
 // The nearest place within `reach` for `box`'s edge on `side` along `axis` where the gap to its
 // neighbour that way is one of its row's: how far the edge moves (`shift`), the gap (`size`),
 // and its neighbours either side -- as `nearest` says it, for the same marks.
-function nearestEdge(list, pairs, axis, box, side, reach) {
+function nearestEdge(list, pairsFor, axis, box, side, reach) {
   const start = box[axis], end = box[axis + 2];
-  const { before, after, row } = beside(list, axis, box, reach);
+  const { before, after, row, around } = beside(list, axis, box, reach);
   const toward = side === "end" ? after : before;
   if (toward < 0) return null;
+  const pairs = pairsFor(axis, around);
   const edge = side === "end" ? end : start;
   let best = null;
   const consider = (size) => {
@@ -427,7 +463,7 @@ function nearestEdge(list, pairs, axis, box, side, reach) {
     const shift = at - edge;
     // (Never past its own other edge.)
     if (Math.abs(shift) > reach || (side === "end" ? at <= start : at >= end)) return;
-    if (!best || Math.abs(shift) < Math.abs(best.shift) - 1e-9) best = { axis, shift, size, before, after, side };
+    if (!best || Math.abs(shift) < Math.abs(best.shift) - 1e-9) best = { axis, shift, size, before, after, side, ...(around.length ? { around } : {}) };
   };
   // As far from that neighbour as it is from the one the other way, whose gap stays.
   const other = side === "end" ? (before >= 0 ? start - list[before][axis + 2] : NaN) : (after >= 0 ? list[after][axis] - end : NaN);
@@ -477,24 +513,38 @@ export function nearer(guide, even) {
 // While a shape is sized by a handle, or drawn, as Keynote's spacing guides catch it: each edge
 // that moves (`sides`: { x, y }, whether one does each way) is where the pointer is (`point`),
 // the rest of `box` ([left, top, right, bottom]) staying, `fixed` the point that stays. Each
-// way, the nearer of a guide (`guide(at, "x" | "y")`: { gap, at }, or null) and the place where
-// the gap from that edge to its neighbour is one its row (or column) has (`spacing`'s edge, made
-// once as the drag starts; null: guides alone; `ways` the ways it is looked for). What comes
-// back: the point moved there, the guides to draw ({ axis, at }), and the gaps to mark,
-// `marks(box)`, once the box is made.
+// way, the nearest of a guide (`guide(at, "x" | "y")`: { gap, at }, or null), the place where
+// the gap from that edge to its neighbour is one its row (or column) has, and the place where
+// it is as wide (or as tall) as another (`spacing`'s edge and size, made once as the drag
+// starts; null: guides alone; `ways` the ways they are looked for) -- a guide first of those
+// as near, then a gap. What comes back: the point moved there, the guides to draw
+// ({ axis, at }), and the gaps to mark, `marks(box)`, once the box is made -- the sizes caught
+// at with them, as `marks(box).sizes` ({ axis, box, size }: each box that size, the one made too).
 export function sizeCatch(spacing, { point, fixed, box, sides, reach, guide, ways = { x: true, y: true } }) {
   let [px, py] = point;
-  const lines = [], found = { x: null, y: null };
+  const lines = [], found = { x: null, y: null }, matched = { x: null, y: null };
   const now = () => [sides.x ? Math.min(px, fixed[0]) : box[0], sides.y ? Math.min(py, fixed[1]) : box[1], sides.x ? Math.max(px, fixed[0]) : box[2], sides.y ? Math.max(py, fixed[1]) : box[3]];
   for (const [axis, name] of [[0, "x"], [1, "y"]]) {
     if (!sides[name]) continue;
     const at = axis === 0 ? px : py;
-    const even = spacing && ways[name] !== false ? spacing.edge(now(), axis, at >= fixed[axis] ? "end" : "start", reach) : null;
-    const [hit, gap] = nearer(guide(at, name), even);
-    const by = hit ? hit.gap : gap ? gap.shift : 0;
-    if (axis === 0) px += by; else py += by;
+    const looked = spacing && ways[name] !== false;
+    const even = looked ? spacing.edge(now(), axis, at >= fixed[axis] ? "end" : "start", reach) : null;
+    const size = looked ? spacing.size?.(axis, at, fixed[axis], reach) ?? null : null;
+    let [hit, gap] = nearer(guide(at, name), even);
+    const by = hit ? hit.gap : gap ? gap.shift : null;
+    // (As wide as another, if that is nearer -- or where the guide or the gap puts it too.)
+    let sized = null;
+    if (size && (by === null || Math.abs(size.shift - by) < 1e-6)) sized = size;
+    else if (size && Math.abs(size.shift) < Math.abs(by) - 1e-9) { sized = size; hit = null; gap = null; }
+    const moved = sized ? sized.shift : by ?? 0;
+    if (axis === 0) px += moved; else py += moved;
     if (hit) lines.push({ axis: name, at: hit.at });
     found[name] = gap;
+    matched[name] = sized;
   }
-  return { point: [px, py], guides: lines, marks: (made) => (spacing ? [...spacing.marks(found.x, made), ...spacing.marks(found.y, made)] : []) };
+  return { point: [px, py], guides: lines, marks: (made) => {
+    const out = spacing ? [...spacing.marks(found.x, made), ...spacing.marks(found.y, made)] : [];
+    out.sizes = spacing?.sized ? [...spacing.sized(matched.x, made), ...spacing.sized(matched.y, made)] : [];
+    return out;
+  } };
 }

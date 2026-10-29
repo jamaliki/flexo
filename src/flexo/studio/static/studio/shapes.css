@@ -78,6 +78,8 @@
 .shape-spacing line { stroke: #d6336c; }
 .shape-spacing-tag { fill: #d6336c; }
 .shape-spacing-words { fill: #ffffff; font-family: var(--font); font-weight: 600; }
+/* A size a drag catches at: a bar along each box that wide (or tall). */
+.shape-size line { stroke: #1c7ed6; stroke-linecap: round; }
 /* The size or turn a drag makes, by the pointer. */
 .shape-layer + .size-tip, .size-tip.shape-tip { position: absolute; z-index: 30; pointer-events: none; white-space: nowrap; font: 600 11px/18px var(--font); color: var(--accent-ink, #fff); background: var(--accent); padding: 0 8px; border-radius: 99px; box-shadow: var(--shadow-2); }
 /* Words typed in a shape where the page has no editor of its own for them (a figure's): a
