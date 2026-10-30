@@ -556,6 +556,7 @@ def _merge_map(old: CommentedMap, new: dict) -> CommentedMap:
             # (A few numbers -- a point, a size -- on one line, as a person writes them.)
             listed = isinstance(value, (list, tuple)) and not _numbers(value)
             made = _merge_seq(CommentedSeq(), list(value)) if listed else _fresh(value)
+            _one_line(key, made)
             old.insert(keys.index(before) + 1 if before in keys else 0, key, made)
         before = key
     return old
@@ -703,7 +704,7 @@ def _fresh(value: Any) -> Any:
     if isinstance(value, dict):
         made = CommentedMap()
         for key, item in value.items():
-            made[key] = _fresh(item)
+            made[key] = _one_line(key, _fresh(item))
         return made
     if isinstance(value, (list, tuple)):
         made = CommentedSeq(_fresh(item) for item in value)
@@ -716,6 +717,16 @@ def _fresh(value: Any) -> Any:
     if isinstance(value, str) and "\n" in value:
         return LiteralScalarString(value)
     return value
+
+
+def _one_line(key: Any, made: Any) -> Any:
+    """``made``, the new value of ``key``, on one line where a person writes it so: how a deck's
+    object is shown from a click on (``click 2: {highlight: [1]}``)."""
+
+    clicked = isinstance(key, str) and re.fullmatch(r"click [1-9][0-9]*", key)
+    if clicked and isinstance(made, CommentedMap):
+        made.fa.set_flow_style()
+    return made
 
 
 def _numbers(value: list | tuple) -> bool:

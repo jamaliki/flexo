@@ -6716,6 +6716,10 @@ export function figureParts(host) {
   // How a part is shown, as it is written: null when plainly. (One in a group written so is
   // shown as its group is.)
   function shownAs(id) {
+    // (Its host may say how it is shown at a time of its own -- a slide's click -- undefined
+    // where it does not: the figure's own lists say.)
+    const said = host.shownAt?.(id);
+    if (said !== undefined) return said;
     const lists = shownLists();
     for (const [how, key] of Object.entries(SHOWN_AS)) if ((lists[key] || []).includes(id)) return how;
     return null;
@@ -6732,6 +6736,8 @@ export function figureParts(host) {
     // (A line too: shown as it says, else as the less shown of its ends -- flexo.showing.)
     const parts = ids.filter((id) => nodeOf(id) || isLine(id) || (groupOf(id) && id !== model()?.root));
     if (!parts.length) return;
+    // (Or its host shows them so, at a time of its own: a slide's click.)
+    if (host.showAt?.(how, parts)) return;
     act({ do: "show", ids: parts, as: how }, { select: false });
   }
   function showAll() { if (anyShownApart()) act({ do: "show", all: true }, { select: false }); }
@@ -6746,7 +6752,7 @@ export function figureParts(host) {
   function showSection(ids) {
     const each = ids.map(shownAs);
     const value = each.every((how) => how === each[0]) ? each[0] || "shown" : "";
-    return h("div.section", {}, h("div.section-title", {}, "Show"),
+    return h("div.section", {}, h("div.section-title", {}, host.showTitle?.() || "Show"),
       ui.segmented({ value, key: `show:${ids.join(",")}`, onChange: (how) => showAs(how, ids), options: [
         { value: "shown", label: "Shown", title: "Drawn plainly" },
         { value: "highlighted", label: "Highlight", title: "Drawn plainly, and the rest of the figure faint" },
