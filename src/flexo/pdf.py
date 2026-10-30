@@ -106,13 +106,17 @@ def write_pdf(
     author: str = "",
     tags: Tagger | None = None,
     language: str = "",
+    fades: Sequence[float | None] = (),
 ) -> Path:
     """Write ``pages`` (Flexo SVGs or drawings) as a PDF, one page each. ``title`` and
     ``author`` are the file's own, as a reader's Properties show them; with ``tags`` it is
-    tagged (see ``Tagger``), in ``language`` (``en-GB``) where it is known."""
+    tagged (see ``Tagger``), in ``language`` (``en-GB``) where it is known. A page whose
+    ``fades`` says a number of seconds is faded to over them by a reader presenting the file
+    full screen (its ``/Trans``: a slide that morphs, where a PDF can do no more)."""
 
     target = Path(target)
-    target.write_bytes(pdf_bytes(pages, title=title, author=author, tags=tags, language=language))
+    made = pdf_bytes(pages, title=title, author=author, tags=tags, language=language, fades=fades)
+    target.write_bytes(made)
     return target
 
 
@@ -123,6 +127,7 @@ def pdf_bytes(
     author: str = "",
     tags: Tagger | None = None,
     language: str = "",
+    fades: Sequence[float | None] = (),
 ) -> bytes:
     if isinstance(pages, str | Drawing):
         pages = [pages]
@@ -132,7 +137,9 @@ def pdf_bytes(
     # (A GIF is the frame its picture names, as paper shows it: flexo.animated.) (Each read as
     # it was for the deck's PowerPoint, or its PDF before, where it was: flexo.drawings_kept.)
     drawings = [drawing_of(stilled(page)) if isinstance(page, str) else page for page in pages]
-    return _Writer(title, author, tags, language).write(drawings)
+    writer = _Writer(title, author, tags, language)
+    writer.fades = list(fades)
+    return writer.write(drawings)
 
 
 @dataclass(slots=True)
@@ -169,6 +176,8 @@ class _Writer:
         self.document = _Element("Document")
         self.parents: list[list[_Element]] = []
         """Each page's elements, by the id of the marked content each holds there."""
+        self.fades: list[float | None] = []
+        """The seconds each page is faded to over, presented full screen; None, cut to."""
 
     def reserve(self) -> int:
         self.objects.append(None)
@@ -198,7 +207,7 @@ class _Writer:
     def write(self, drawings: list[Drawing]) -> bytes:
         catalog, tree, resources = self.reserve(), self.reserve(), self.reserve()
         kids = []
-        for drawing in drawings:
+        for number, drawing in enumerate(drawings):
             page = self.reserve()
             content = _Content(self, drawing.height, page)
             content.items(drawing.root.items)
@@ -216,6 +225,9 @@ class _Writer:
             structure = f"/StructParents {len(self.parents)} /Tabs /S " if self.tags else ""
             if self.tags:
                 self.parents.append(content.marked)
+            fade = self.fades[number] if number < len(self.fades) else None
+            if fade:
+                structure += f"/Trans << /Type /Trans /S /Fade /D {_n(fade)} >> "
             kids.append(
                 self.put(
                     page,
