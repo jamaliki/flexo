@@ -756,7 +756,7 @@ class Assistant:
                 provider = self.provider
             self.stopping.clear()
             mark = len(provider.messages)
-            provider.messages.append(provider.user(_context(context), text))
+            provider.messages.append(provider.user(_context(context, self.workspace), text))
             turn = {
                 "id": secrets.token_hex(5),
                 "role": "assistant",
@@ -916,7 +916,7 @@ def _echoable(content: list[Any]) -> list[dict[str, Any]]:
     return kept + blocks[last + 1 :]
 
 
-def _context(context: dict[str, Any]) -> str:
+def _context(context: dict[str, Any], workspace: Workspace | None = None) -> str:
     lines = []
     if context.get("file"):
         lines.append(f"The user is looking at {context['file']}.")
@@ -925,6 +925,13 @@ def _context(context: dict[str, Any]) -> str:
         label = where.get("label") if isinstance(where, dict) else str(where)
         page = where.get("page") if isinstance(where, dict) else None
         lines.append(f"Selected: {label or ''}{f' (page {page})' if page else ''}.")
+        if workspace is not None:
+            # Where that is in the YAML ("this" in what they ask): slides[2].body[0], a part's id.
+            from flexo.studio.agent_read import chosen
+
+            path = chosen(workspace, {"file": context.get("file"), "where": where})
+            if path:
+                lines.append(f"Selected, in the YAML: {path}.")
     if context.get("open"):
         lines.append("Open documents: " + ", ".join(context["open"]) + ".")
     return "\n".join(lines) or "The user has no document open."
@@ -942,4 +949,7 @@ def _label(name: str, arguments: Any) -> str:
         "look": f"Looked at {file}"
         + (f" · page {', '.join(map(str, arguments['pages']))}" if arguments.get("pages") else ""),
         "status": str(arguments.get("doing", "")),
+        "outline": f"Outlined {file}",
+        "guide": "Read the guide"
+        + (f" on {arguments['topic']}" if arguments.get("topic") else ""),
     }.get(name, name)

@@ -174,6 +174,16 @@ class Kind(Protocol):
     #   malformed(document) -> str | None: what makes a document one its editor cannot
     #       show (a deck whose slides are a number), if anything: such a file is not
     #       taken in (nor written over), and such an edit is refused.
+    # And, for agents to read it a little at a time (flexo.studio.agent_guides, agent_read,
+    # agent_look, agent_report):
+    #   brief() -> str: what an agent is told first, guide()'s topics a call away;
+    #   topics() -> {name: agent_guides.Topic}: guide() cut into topics, with examples;
+    #   outline(document, drawing) -> [str]: the document in brief, a line a page;
+    #   excerpt(text, numbers) -> str: some of its pages (a deck's slides), as the text has them;
+    #   selected(document, where) -> str | None: where a person is, as a path in its YAML;
+    #   marks(document, number, page) -> [agent_look.Mark]: what to outline on a page;
+    #   at_step(page, step) -> str: a page's drawing as it stands at a build step;
+    #   report(before, after) -> {"changes", "deleted", "pages", "noun"}: what an edit did.
 
 
 def kinds() -> dict[str, Kind]:
