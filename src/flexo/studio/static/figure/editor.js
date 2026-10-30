@@ -253,7 +253,9 @@ export function mount(studio, main) {
   const design = figureBar({ studio, figure, root: () => root, page: () => (drawingOf() ? page : null),
     aspect: () => Math.min(2.4, Math.max(0.75, natural.width / natural.height || 1.5)),
     customise: (current, set) => customiseTheme(current, set), shown: () => showTabs() });
+  // (What it draws, for the colour pickers' "In This Figure": colourpicker.js.)
   const colours = colourKey({ studio, fallback: () => inspector, settled: () => figure.idle(),
+    source: () => { const roles = studio.info?.roles || {}; return { title: "In This Figure", root: drawingOf(), skip: [roles.canvas, roles.ink], theme: Object.values(roles) }; },
     kinds: () => (typingNow() ? [] : [partColours(figure), shapes.any() ? shapeColours(shapes) : null].filter(Boolean)),
     anchor: () => boxAround([partsBox(figure, elementOf), shapes.any() ? shapesBox(shapes, page) : null].filter(Boolean).map((box) => ({ getBoundingClientRect: () => box }))) });
   // A drawing pasted or dropped (Inkscape's): shapes over the figure, centred where the

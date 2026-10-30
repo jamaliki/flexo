@@ -32,6 +32,17 @@ export function paintedMain(spec, hex, alpha = null) {
 
 const NAMES = { fill: "Fill", line: "Outline", colour: "Text" };
 
+// The theme's colours a shape takes by name (`roles`, its palette's: role -> colour), as its
+// panel offers them (shapes.js): a fill's tints, strong colours, grey, paper, muted and ink; a
+// line's (and words') strong colours, muted, ink and paper. [{ value, colour }].
+export function paintNames(roles = {}, paint = "line") {
+  const tones = [1, 2, 3, 4, 5, 6].filter((n) => roles[`tone-${n}-stroke`]);
+  const tone = (n) => (n === 1 ? "accent" : `accent${n}`);
+  const names = paint === "fill" ? [...tones.map((n) => `${tone(n)}-fill`), ...tones.map(tone), "grey", "paper", "muted", "ink"]
+    : [...tones.map(tone), "muted", "ink", "paper"];
+  return names.filter((name) => roles[F.roleOf(name)]).map((value) => ({ value, colour: F.paintOf(value, roles) }));
+}
+
 // The shapes chosen as a kind of colourKey's: null with none chosen (or words being typed).
 export function shapeColours(shapes) {
   if (!shapes || shapes.typing?.()) return null;
@@ -43,18 +54,20 @@ export function shapeColours(shapes) {
   const linesAll = flat.every((spec) => F.family(spec.kind) === "line" || (F.family(spec.kind) === "points" && !spec.closed));
   const closedAny = flat.some((spec) => F.isClosed(spec) || spec.kind === "text");
   const opacity = (key, alpha) => (alpha !== null ? { [key]: alpha } : {});
+  const roles = shapes.roles?.() || {};
+  const fills = paintNames(roles, "fill"), lines = paintNames(roles, "line");
   const colours = [];
-  if (closedAny) colours.push({ paint: "fill", name: "Fill", value: shared("fill"), set: (hex, alpha) => shapes.set({ fill: hex, ...opacity("fill_opacity", alpha) }, "Change Fill", "fill") });
+  if (closedAny) colours.push({ paint: "fill", name: "Fill", value: shared("fill"), offered: fills, set: (hex, alpha) => shapes.set({ fill: hex, ...opacity("fill_opacity", alpha) }, "Change Fill", "fill") });
   // (Lines alone are seen by their line: its colour, "Colour of 2 Lines".)
-  colours.push({ paint: "line", name: linesAll ? "Colour" : "Outline", value: shared("line"),
+  colours.push({ paint: "line", name: linesAll ? "Colour" : "Outline", value: shared("line"), offered: lines,
     set: (hex, alpha) => shapes.set({ line: hex, ...opacity("line_opacity", alpha) }, linesAll ? "Change Line" : "Change Outline", "line") });
-  if (!specs.some((spec) => spec.kind === "group")) colours.push({ paint: "colour", name: "Text", value: shared("colour"), set: (hex) => shapes.set({ colour: hex }, "Change Text Colour") });
+  if (!specs.some((spec) => spec.kind === "group")) colours.push({ paint: "colour", name: "Text", value: shared("colour"), offered: lines, set: (hex) => shapes.set({ colour: hex }, "Change Text Colour") });
   const mains = new Set(flat.map(mainPaint));
   let main = 0;
   if (mains.size === 1) main = Math.max(0, colours.findIndex((colour) => colour.paint === [...mains][0]));
   else {
     // Each by the colour it is seen by: a box's fill, a line's line.
-    colours.unshift({ paint: "main", name: "Colour", value: undefined,
+    colours.unshift({ paint: "main", name: "Colour", value: undefined, offered: lines,
       set: (hex, alpha) => shapes.change((list) => { for (const index of shapes.order()) if (list[index]) list[index] = paintedMain(list[index], hex, alpha); }, "Change Colour") });
   }
   return { noun: shapes.label?.() || `${specs.length} Shapes`, colours, main, names: NAMES };

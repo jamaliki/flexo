@@ -390,8 +390,10 @@ export function aligningInApp() {
 const said = (size) => String(Math.round(size * 10) / 10);
 // Each gap of a catch drawn in `into` (the editor's guides, in the page's units; `px` a
 // screen pixel there): a line across it, its ends marked, its size beside it. `S` makes an
-// SVG element.
+// SVG element. And a size caught at (`marks.sizes`: aligning.js's sizeCatch): a bar along
+// each box that size, the one sized and those it is as wide (or as tall) as.
 export function drawSpacing(into, marks, px, S) {
+  if (marks.sizes?.length) drawSizes(into, marks.sizes, px, S);
   for (const { axis, from, to, at, size } of marks) {
     const tick = 4 * px, words = said(size);
     const width = (words.length * 6 + 8) * px, height = 13 * px;
@@ -404,5 +406,19 @@ export function drawSpacing(into, marks, px, S) {
       ...ends.map(([x1, y1, x2, y2]) => S("line", { x1, y1, x2, y2, "stroke-width": 1.2 * px })),
       S("rect", { class: "shape-spacing-tag", x: cx - width / 2, y: cy - height / 2, width, height, rx: height / 2 }),
       Object.assign(S("text", { class: "shape-spacing-words", x: cx, y: cy + 3.6 * px, "text-anchor": "middle", "font-size": 10 * px }), { textContent: words })));
+  }
+}
+
+// A bar just outside each box (`marks`: { axis, box }) the length of the size it shares: over
+// it for a width, at its left for a height, its ends marked.
+export function drawSizes(into, marks, px, S) {
+  const off = 6 * px, tick = 3.5 * px;
+  for (const { axis, box } of marks) {
+    const [x0, y0, x1, y1] = box;
+    const ends = axis === 0 ? [[x0, y0 - off], [x1, y0 - off]] : [[x0 - off, y0], [x0 - off, y1]];
+    const ticks = ends.map(([x, y]) => (axis === 0 ? [x, y - tick, x, y + tick] : [x - tick, y, x + tick, y]));
+    into.append(S("g", { class: "shape-size" },
+      S("line", { x1: ends[0][0], y1: ends[0][1], x2: ends[1][0], y2: ends[1][1], "stroke-width": 1.5 * px }),
+      ...ticks.map(([x1, y1, x2, y2]) => S("line", { x1, y1, x2, y2, "stroke-width": 1.5 * px }))));
   }
 }

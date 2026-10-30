@@ -244,6 +244,38 @@ class FigureKind:
     def guide(self) -> str:
         return GUIDE
 
+    # -- for agents (flexo.studio.agent): a brief, topics, an outline, marks, a report --
+
+    def brief(self) -> str:
+        from flexo.studio.figure_guides import brief
+
+        return brief()
+
+    def topics(self) -> dict[str, Any]:
+        from flexo.studio.figure_guides import topics
+
+        return topics()
+
+    def outline(self, document: dict[str, Any], drawing: Drawing) -> list[str]:
+        from flexo.studio.figure_agent import outline
+
+        return outline(document, drawing)
+
+    def marks(self, document: dict[str, Any], number: int, page: Page) -> list[Any]:
+        from flexo.studio.figure_agent import marks
+
+        return marks(document, number, page)
+
+    def selected(self, document: dict[str, Any], where: dict[str, Any]) -> str | None:
+        from flexo.studio.figure_agent import selected
+
+        return selected(document, where)
+
+    def report(self, before: Any, after: Any) -> dict[str, Any]:
+        from flexo.studio.figure_agent import report
+
+        return report(before, after)
+
     def describe(self, before: Any, after: Any) -> list[dict[str, Any]]:
         """What an edit did, said as the figure has it ("added “Cache”", "connected “A” to
         “B”"), not as lines of its file -- but for a file that does not read as a figure."""

@@ -631,3 +631,67 @@ def test_one_order_across_a_slides_objects_and_its_shapes() -> None:
     )
     assert made["clicks"] == ["own:a", 5, "own:b", 2]
     assert made["banded"] == [2, "own:b", "own:a", 5]
+
+
+def test_sized_it_catches_another_s_width_and_marks_each_that_wide() -> None:
+    made = run("""
+      // Two apart from it, 60 and 90 wide; a third far below, 60 wide too.
+      const s = A.spacing([box(0, 0, 60, 40), box(300, 0, 90, 40), box(500, 300, 60, 30)]);
+      const across = { x: true, y: false };
+      const none = () => null;
+      // Sized by its right edge, from 120: the pointer at 177 (57 wide) is caught at 180.
+      const sized = A.sizeCatch(s, { point: [177, 20], fixed: [120, 20], box: [120, 0, 170, 40],
+        sides: across, reach: 6, guide: none });
+      const made = [120, 0, 180, 40];
+      const marks = sized.marks(made);
+      // A guide at 178 is nearer: it wins, and no size is marked.
+      const guided = A.sizeCatch(s, { point: [177, 20], fixed: [120, 20], box: [120, 0, 170, 40],
+        sides: across, reach: 6,
+        guide: (at) => (Math.abs(178 - at) <= 6 ? { gap: 178 - at, at: 178 } : null) });
+      // Its left edge dragged, its right at 260: the pointer at 172 (88 wide) is caught at 170.
+      const left = A.sizeCatch(s, { point: [172, 20], fixed: [260, 20], box: [200, 0, 260, 40],
+        sides: across, reach: 6, guide: none });
+      // Down, as tall as another (40): drawn from (120, 100) to a pointer 38 below.
+      const drawn = A.sizeCatch(s, { point: [150, 138], fixed: [120, 100],
+        box: [120, 100, 120, 100], sides: { x: true, y: true }, reach: 6, guide: none,
+        ways: { x: false, y: true } });
+      return { sized: sized.point, spacing: marks.length,
+        sizes: marks.sizes.map((m) => [m.axis, m.box]),
+        guided: [guided.point, guided.marks([120, 0, 178, 40]).sizes.length],
+        left: left.point, drawn: drawn.point,
+        // Let go a size other than the one caught (kept in proportion, say): nothing marked.
+        stale: sized.marks([120, 0, 175, 40]).sizes.length };
+    """)
+    assert made["sized"] == [180, 20]
+    assert made["spacing"] == 0
+    assert made["sizes"] == [[0, [120, 0, 180, 40]], [0, [0, 0, 60, 40]], [0, [500, 300, 560, 330]]]
+    assert made["guided"] == [[178, 20], 0]
+    assert made["left"] == [170, 20]
+    assert made["drawn"] == [150, 140]
+    assert made["stale"] == 0
+
+
+def test_a_backdrop_round_the_one_dragged_is_not_its_neighbour() -> None:
+    made = run("""
+      // One outside at the left, a panel 30 after it, and in the panel the next of the row,
+      // 40 after the first: dragged in the panel after that one, it catches 40 after it, as
+      // the row is spaced -- not 30, the gap from the first to the panel's edge.
+      const s = A.spacing([box(0, 30, 40, 40), box(70, 0, 330, 100), box(80, 30, 40, 40)]);
+      const forty = s.caught(box(163, 30, 40, 40), 6).x;
+      const thirty = s.caught(box(153, 30, 40, 40), 6).x;
+      const marks = s.marks(forty, box(160, 30, 40, 40)).map((m) => [m.from, m.to])
+        .sort((a, b) => a[0] - b[0]);
+      // Sized, its left edge at 162: caught at 160 alike.
+      const edge = s.edge(box(162, 30, 40, 40), 0, "start", 6);
+      // Out of the panel, past its right edge, the panel is its neighbour as any other is.
+      const beyond = s.caught(box(433, 30, 40, 40), 6).x;
+      return { forty, thirty, marks, edge, beyond };
+    """)
+    assert made["forty"]["shift"] == pytest.approx(-3)
+    assert made["forty"]["size"] == pytest.approx(40)
+    assert made["thirty"] is None
+    # The row's gaps, none to or from the panel.
+    assert made["marks"] == [[40, 80], [120, 160]]
+    assert made["edge"]["shift"] == pytest.approx(-2)
+    assert made["beyond"]["shift"] == pytest.approx(-3)
+    assert made["beyond"]["size"] == pytest.approx(30)

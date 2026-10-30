@@ -4,27 +4,54 @@
 // typed and Return does the same, Esc closes it with nothing changed. A clipboard that holds a
 // colour already shows it in the field, chosen, so that Return alone applies it. It names what
 // it will colour ("Fill of 3 Shapes"), and a switch under it goes to the thing's other colours
-// (Fill, Outline, Text), Tab and the arrows going along it; the colours applied last are there
-// to click. Each colour applied is one step in the history, named as the inspector's are.
+// (Fill, Outline, Text), Tab and the arrows going along it; the colours the document draws
+// ("On This Slide") and those applied last are there to click, and the eyedropper takes one
+// from the screen. Each colour applied is one step in the history, named as the inspector's are.
+//
+// Pick Colour… (⌃⌘C) is the eyedropper at once: the colour clicked anywhere on the screen
+// given to what is chosen, its main colour -- another object's own colour, exactly, where one
+// of the page's is clicked, by its theme's name where it has one (colourpicker.js).
 //
 // What is chosen comes as kinds, each with its colours (a slide's objects and its shapes, a
 // figure's parts and the shapes drawn over it): [{ noun: "3 Shapes", colours: [{ name: "Fill",
 // value, set(hex, alpha) }, ...], main }], `main` the one ⇧⌘C colours first -- a closed shape's
 // fill, a line's colour, a text's words. Several kinds are coloured together: each its own main
-// colour first ("Both"), then each colour they share by name.
+// colour first ("Both"), then each colour they share by name. A colour may say the theme's
+// colours it takes by name (`offered`: [{ value, colour }]): one taken from the screen in one
+// of those is given as that name.
 
-import { h, ui, popover, closeMenu } from "./ui.js";
+import { h, ui, icon, popover, closeMenu, roving } from "./ui.js";
 import { parseColour, hexOf, shownHex, recentColours, hexField, applyColour, colourChoices, boxAround } from "./hexcolour.js";
 import { joinSteps } from "./mixing.js";
+import { valueFor } from "./colourmatch.js";
+import { canPick, pickFromScreen } from "./eyedropper.js";
+import { drawnColours, sampledValue, light } from "./colourpicker.js";
 
 export { colourChoices, boxAround };
 
 export const SET_COLOUR = "Set Colour…";
 export const SET_COLOUR_KEYS = "⇧⌘C";
+export const PICK_COLOUR = "Pick Colour…";
+export const PICK_COLOUR_KEYS = "⌃⌘C";
 
 // ⇧⌘C (⇧Ctrl-C off a Mac), by the letter it types: as a Mac's menu matches it.
 export function isColourKey(event) {
   return Boolean((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && String(event.key || "").toLowerCase() === "c");
+}
+// ⌃⌘C, Pick Colour…: a Mac's alone (⌘ and Control both).
+export function isPickKey(event) {
+  return Boolean(event.metaKey && event.ctrlKey && !event.shiftKey && !event.altKey && String(event.key || "").toLowerCase() === "c");
+}
+
+// `value` (a colour's code, or a theme's colour by name) given to `choice`, one step -- several
+// kinds' edits joined into it, once `settled()` (a figure's edits landed), as a change of both
+// kinds is (mixed.js).
+function given(choice, value, alpha, { studio = null, settled = null } = {}) {
+  const from = studio?.past?.length ?? -1;
+  applyColour(() => choice.set(value, alpha), value, alpha);
+  const join = () => { if (studio && from >= 0 && studio.past.length - from > 1) joinSteps(studio, from, `Change ${choice.name === "Both" ? "Colours" : choice.name}`); };
+  const landed = settled?.();
+  if (landed && typeof landed.then === "function") landed.then(join, join); else join();
 }
 
 // The colour on the clipboard now, if it holds one: the Mac app's (its own pasteboard, read
@@ -54,18 +81,13 @@ export function setColour(choices, { anchor = null, fallback = null, studio = nu
   let taken = false;
   const what = h("div.colour-pop-what");
   const chip = h("span.colour-pop-chip", { "aria-hidden": "true" });
-  const hint = h("div.colour-pop-hint");
-  const done = (hex, alpha) => {
+  const done = (value, alpha) => {
     if (taken) return;
     taken = true;
     const choice = choices[at];
     closeMenu();
-    const from = studio?.past?.length ?? -1;
-    applyColour(() => choice.set(hex, alpha), hex, alpha);
     // (Several kinds' edits, made one step: undone together.)
-    const join = () => { if (studio && from >= 0 && studio.past.length - from > 1) joinSteps(studio, from, `Change ${choice.name === "Both" ? "Colours" : choice.name}`); };
-    const landed = settled?.();
-    if (landed && typeof landed.then === "function") landed.then(join, join); else join();
+    given(choice, value, alpha, { studio, settled });
   };
   const field = hexField({ placeholder: "Paste or type a colour", leaving: false, title: "Colour", apply: done });
   field.removeAttribute("title");
@@ -74,8 +96,7 @@ export function setColour(choices, { anchor = null, fallback = null, studio = nu
     chip.style.background = read ? read.hex : "";
   };
   let typed = false;
-  const HINT = "Paste a colour (⌘V), or type one and press Return";
-  field.addEventListener("input", () => { typed = true; preview(); hint.textContent = HINT; });
+  field.addEventListener("input", () => { typed = true; preview(); });
   // The colour the thing has now, chosen in the field, to be typed or pasted over.
   const showChoice = () => {
     const choice = choices[at];
@@ -89,11 +110,27 @@ export function setColour(choices, { anchor = null, fallback = null, studio = nu
   };
   const switcher = choices.length > 1 ? ui.segmented({ value: 0, key: "colour-pop:switch", options: choices.map((choice, index) => ({ value: index, label: choice.name, title: choice.said })),
     onChange: (index) => { at = index; showChoice(); field.focus(); field.select(); } }) : null;
-  const recent = recentColours();
+  // The colours the document draws, the most used first: one clicked is given by the theme's
+  // name where it is one of the colours the thing takes by name. Then those applied last.
+  const drawn = drawnColours([]);
+  const recent = recentColours().filter((hex) => !drawn.colours.includes(hex));
   const recents = recent.length ? h("div.colour-pop-recent", { "aria-label": "Recent Colours" }, recent.map((hex) => h("button.recent-dot", {
     type: "button", title: shownHex(hex), "aria-label": `Recent Colour ${shownHex(hex)}`, style: { background: hex }, onclick: () => done(hex, null) }))) : null;
-  hint.textContent = HINT;
-  const node = popover(anchorPoint(anchor, fallback), [what, h("div.colour-pop-row", {}, field, chip), switcher, recents, hint], { className: "colour-pop" });
+  const shown = drawn.colours.length ? h("div.cp-swatches", { role: "group", "aria-label": drawn.title }, drawn.colours.map((hex) => h(`button.swatch${light(hex) ? ".light" : ""}`, {
+    type: "button", title: shownHex(hex), "aria-label": `${drawn.title}: ${shownHex(hex)}`, style: { background: hex },
+    onclick: () => done(valueFor(hex, choices[at].offered || []), null) }))) : null;
+  if (shown) roving(shown, () => [...shown.children]);
+  // The eyedropper: a colour taken from the screen (another object's own, exactly).
+  const dropper = canPick() ? h("button.cp-dropper", { type: "button", title: PICK_COLOUR.replace("…", ""), "aria-label": "Pick a Colour from the Screen",
+    onclick: async () => {
+      const sample = await pickFromScreen({ hide: node });
+      if (!sample || !node.isConnected) return;
+      const found = sampledValue(sample, { offered: choices[at].offered || [] });
+      if (found) done(found.value, null);
+    } }, icon("eyedropper")) : null;
+  const node = popover(anchorPoint(anchor, fallback), [what, h("div.colour-pop-row", {}, field, chip, dropper), switcher,
+    shown ? h("div.cp-section", {}, h("div.cp-title", {}, drawn.title), shown) : null,
+    recents ? h("div.cp-section", {}, h("div.cp-title", {}, "Recent"), recents) : null], { className: "colour-pop" });
   node.setAttribute("aria-label", "Set Colour");
   open = node;
   showChoice();
@@ -105,7 +142,6 @@ export function setColour(choices, { anchor = null, fallback = null, studio = nu
     if (!read || !node.isConnected || typed || taken) return;
     field.value = shownHex(read.hex) + (read.alpha !== null ? Math.round(read.alpha * 255).toString(16).padStart(2, "0").toUpperCase() : "");
     preview();
-    hint.textContent = "From the clipboard: Return applies it";
     if (document.activeElement === field) field.select();
   });
   return node;
@@ -140,10 +176,12 @@ function place(node, anchor, fallback) {
 export const colourOpen = () => Boolean(open?.isConnected);
 
 // What an editor gives: `kinds()` (what is chosen, by kind, with its colours: colourChoices),
-// `anchor()` (where it is on the screen), `fallback()` (the inspector), `studio`, `settled()`. Its key
-// (true if taken), its command for the palette and the Mac app's Format › Set Colour…, and the
-// popover opened.
-export function colourKey({ kinds, anchor = () => null, fallback = () => null, studio = null, settled = null }) {
+// `anchor()` (where it is on the screen), `fallback()` (the inspector), `studio`, `settled()`,
+// and `source()` (what it draws, for the colours the pickers offer: colourpicker.js's
+// colourSource). Its keys (true if taken), its commands for the palette and the Mac app's
+// Format › Set Colour… and Pick Colour…, and the popover opened.
+export function colourKey({ kinds, anchor = () => null, fallback = () => null, studio = null, settled = null, source = null }) {
+  if (studio && source) studio.colourSource = source;
   const now = () => { try { return colourChoices(kinds()); } catch (error) { console.error(error); return []; } };
   const show = () => {
     const choices = now();
@@ -151,12 +189,26 @@ export function colourKey({ kinds, anchor = () => null, fallback = () => null, s
     setColour(choices, { anchor: anchor(), fallback: fallback(), studio, settled });
     return true;
   };
+  // The eyedropper at once, for the main colour of what is chosen (Set Colour…'s first).
+  const pick = () => {
+    const choices = now();
+    if (!choices.length || !canPick()) return false;
+    const [choice] = choices;
+    pickFromScreen().then((sample) => {
+      const found = sample && sampledValue(sample, { offered: choice.offered || [] });
+      if (found) given(choice, found.value, null, { studio, settled });
+    });
+    return true;
+  };
   return {
-    key: (event) => isColourKey(event) && show(),
+    key: (event) => (isColourKey(event) && show()) || (isPickKey(event) && pick()),
     commands: () => {
       const choices = now();
-      return choices.length ? [{ icon: "palette", label: SET_COLOUR, keys: SET_COLOUR_KEYS, hint: choices[0].said, run: () => { show(); } }] : [];
+      if (!choices.length) return [];
+      return [{ icon: "palette", label: SET_COLOUR, keys: SET_COLOUR_KEYS, hint: choices[0].said, run: () => { show(); } },
+        ...(canPick() ? [{ icon: "eyedropper", label: PICK_COLOUR, keys: PICK_COLOUR_KEYS, hint: choices[0].said, run: () => { pick(); } }] : [])];
     },
     show,
+    pick,
   };
 }

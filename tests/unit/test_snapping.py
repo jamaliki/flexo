@@ -229,3 +229,27 @@ def test_a_box_catches_at_the_grid_by_its_edges_and_at_the_layout_by_its_middle_
         "guides": {"gap": 0.5, "at": 19},
         "none": None,
     }
+
+
+def test_a_side_sized_catches_where_it_is_as_wide_as_another() -> None:
+    made = run("""
+      const s = await fresh();
+      const boxes = [[0, 0, 40, 30], [100, 0, 160, 20], [0, 100, 40.0004, 120], [5, 5, 5.5, 50]];
+      const [widths, heights] = s.sizesOf(boxes);
+      return {
+        widths, heights,
+        // Its right edge at 158, its left at 100: 58 wide, near another's 60.
+        right: s.sizeAt(158, 100, widths, 4),
+        // Its left edge dragged out to 63, its right at 100: 37 wide, near 40.
+        left: s.sizeAt(63, 100, widths, 4),
+        far: s.sizeAt(150, 100, widths, 4),
+        same: s.sameSize(boxes, 40, 0).length,
+      };
+    """)
+    # Each size once, and none a hair wide (a line's box, edge on).
+    assert sorted(made["widths"]) == [40, 60]
+    assert sorted(made["heights"]) == [20, 30, 45]
+    assert made["right"] == {"shift": 2, "size": 60}
+    assert made["left"] == {"shift": -3, "size": 40}
+    assert made["far"] is None
+    assert made["same"] == 2

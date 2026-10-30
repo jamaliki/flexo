@@ -1541,6 +1541,19 @@ meanwhile and since; the palette offers it for the document shown too.
   **More** (panel letters, Customise…). While the Theme or Colours menu is open, the theme or
   palette the pointer is over shows on the figure; chosen, it is one step to undo. The
   inspector keeps what is the figure's parts' own.
+- **Colours**: every colour's well opens the studio's picker -- a plane of saturation and
+  brightness, the hue and (for a fill or a line) the opacity under it, the colour's code to
+  type or paste, the colours the figure or slide draws already (**In This Figure**, **On This
+  Slide**, the most used first) and those applied last. Its eyedropper takes a colour from
+  anywhere on the screen: in the Mac app with the Mac's own magnifier, from any window or app
+  (a micrograph open in Preview, a co-author's PDF); in Chrome with its EyeDropper (a browser
+  without one shows none). Clicked on something the studio drew, it takes that thing's own
+  colour exactly -- by the theme's name where it is one of the theme's, so an outline taken
+  from an accent line is `accent` and follows the theme -- and a colour the screen shows a
+  rounding step off one the document has is that colour. **Pick Colour…** (⌃⌘C, Format) is
+  the eyedropper at once, for the main colour of what is chosen, and **Set Colour…** (⇧⌘C)
+  has it too. Each colour chosen -- a swatch, a code, a colour picked, a drag across the plane
+  from press to release -- is one step to undo.
 - **Figures**, made without writing YAML: **Add** offers every kind of part --
   blocks and operators, the machine-learning components, constructs, plasmids,
   proteins, trees, plates, timelines, structures -- and a part added while another

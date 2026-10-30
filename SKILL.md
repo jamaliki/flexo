@@ -235,12 +235,17 @@ inspector; every edit is written to the YAML file, comments and order kept.
 People and agents edit the same files live.
 
 **Working as an agent in a studio**: `claude mcp add flexo-studio -- flexo studio
-mcp` (once, in the folder) gives you `list_documents`, `open_document`,
-`read_document`, `edit_document` (replace text that occurs once, like an edit
-tool), `write_document`, `look` (the pages as pictures, with lint), and
-`status` (tell the people what you are doing, in a few words). The loop is the
-same as above: read, edit the YAML, `look`, fix, `look` again. Write figures as
-YAML there (`flexo.dump_figure(spec)` shows how any Python figure reads as YAML).
+mcp` (once, in the folder) gives you `list_documents`, `open_document` (a short
+brief the first time), `outline` (the document in brief, a line a part or slide,
+with its warnings and what the user has selected), `read_document`,
+`edit_document` (replace text that occurs once, like an edit tool; the reply says
+what changed and warns of anything deleted), `write_document`, `look` (the pages
+as pictures, with lint; `annotate` labels each part with its id, `sheet` tiles
+many pages in one picture), `guide` (one topic at a time, with examples that
+draw), and `status` (tell the people what you are doing, in a few words). The
+loop is the same as above: outline, read, edit the YAML, `look` once, fix. Write
+figures as YAML there (`flexo.dump_figure(spec)` shows how any Python figure
+reads as YAML).
 
 A folder's Python (a deck's plots, a figure's) runs only once its person trusts the
 folder; the studio reads and writes only inside the folder.

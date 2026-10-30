@@ -294,3 +294,16 @@ def test_a_slide_with_a_comment_over_it_copied_and_undone_keeps_its_comment() ->
         assert written.count("# --- the middle ---") == 1
         assert rewrite(written, document, fresh, name="talk.yaml") == DECK
 
+
+
+def test_how_an_object_is_shown_from_a_click_on_is_one_line() -> None:
+    # (As a person writes it: ``click 2: {highlight: [1]}`` -- a deck's, flexo_talk.onclick.)
+    text = "body:\n- bullets: [One, Two]  # kept\n"
+    document = {"body": [{"bullets": ["One", "Two"], "click 1": {"highlight": [1]}, "click 2": {}},
+                         {"text": "New", "click 3": {"hide": True, "dim": ["x"]}}]}
+    written = rewrite(text, document, fresh)
+    assert written == (
+        "body:\n- bullets: [One, Two]  # kept\n  click 1: {highlight: [1]}\n  click 2: {}\n"
+        "- text: New\n  click 3: {hide: true, dim: [x]}\n"
+    )
+    assert yaml.safe_load(written) == document

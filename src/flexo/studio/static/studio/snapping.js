@@ -95,6 +95,34 @@ export function nearest(mine, values, reach) {
   return best;
 }
 
+// -- sizes --
+
+// While one is sized or drawn, the side that moves catches where it is as wide (or as tall)
+// as another: the widths and the heights of `boxes` ([left, top, right, bottom] each), once
+// as the drag starts -- each one once, none narrower than a hair (a line's box, edge on).
+const LEAST = 2;
+export function sizesOf(boxes) {
+  const ways = [new Set(), new Set()];
+  for (const box of boxes) {
+    for (const axis of [0, 1]) {
+      const size = box[axis + 2] - box[axis];
+      if (Number.isFinite(size) && size >= LEAST) ways[axis].add(Math.round(size * 1000) / 1000);
+    }
+  }
+  return ways.map((sizes) => [...sizes]);
+}
+// The edge at `at` along an axis, the other at `fixed`, caught within `reach` where the box is
+// as wide (or tall) as one of `sizes`: how far that edge moves (`shift`) and the size.
+export function sizeAt(at, fixed, sizes, reach) {
+  const own = Math.abs(at - fixed);
+  const found = nearest([own], sizes, reach);
+  if (!found || found.at < LEAST) return null;
+  return { shift: (at >= fixed ? 1 : -1) * found.gap, size: found.at };
+}
+// Of `boxes`, those `size` wide (`axis` 0) or tall (1), within `slack`: what a size caught at
+// marks, with the one sized.
+export const sameSize = (boxes, size, axis, slack = 0.05) => boxes.filter((box) => Math.abs(box[axis + 2] - box[axis] - size) <= slack);
+
 // Another window or tab of this browser turned it (or cleared what it keeps).
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
   window.addEventListener("storage", (event) => {
