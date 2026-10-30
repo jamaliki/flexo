@@ -6916,7 +6916,7 @@ export function figureParts(host) {
       value: typing(toneKey) ?? (() => { const tone = common((target) => target.type === "node" ? target.item.properties?.tone : null); return tone && !/^\d+$/.test(String(tone)) ? tone : ""; })(),
       options: TONE_NAMES(), key: toneKey, placeholder: "None",
       onChange: (value) => paint("node", { "properties.tone": value.trim() || null }),
-    }), { hint: "Same name, same colour" }) : null;
+    })) : null;
     const own = h("div.own-colours", {}, OWN.map(([part, label]) => h("div.own-colour", {},
       ui.colour({
         title: label, key: `colour:${scope}:${part}`,
@@ -6925,7 +6925,7 @@ export function figureParts(host) {
       }),
       h("span", {}, nodes.length ? label : GROUP_OWN[part]))));
     return h("div.section", {}, h("div.section-title", {}, "Colour"), chips, named,
-      ui.field("Custom", own, { hint: "Overrides the tone and the theme" }));
+      ui.field("Custom", own));
   }
 
 

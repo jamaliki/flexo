@@ -1,0 +1,61 @@
+/* The colour picker (colourpicker.js): a plane of saturation and brightness, the hue and
+   opacity under it with the eyedropper, the colour's code, and the colours drawn and applied
+   last -- quiet, in the popover's own white, as a Mac's colour popover is. */
+
+.menu.colour-picker { width: 240px; padding: 10px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; overflow: visible; max-height: none; }
+
+.cp-plane {
+  position: relative; height: 136px; border-radius: 6px; cursor: crosshair; touch-action: none; outline: none;
+  background: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent), var(--cp-hue, #f00);
+  box-shadow: var(--chip-ring);
+}
+.cp-plane:focus-visible { box-shadow: var(--chip-ring), 0 0 0 3px var(--focus-ring); }
+.cp-knob {
+  position: absolute; left: var(--cp-x, 0%); top: var(--cp-y, 0%); width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
+  background: var(--cp-colour, #888); box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.3); pointer-events: none;
+}
+
+.cp-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cp-sliders { flex: 1 1 0; min-width: 0; display: grid; gap: 8px; }
+.cp-fade { display: flex; align-items: center; gap: 6px; }
+.cp-percent { flex: none; width: 34px; text-align: right; font: var(--text-small); font-variant-numeric: tabular-nums; color: var(--ink-3); }
+
+/* The sliders: a track the colours they go through, a round white knob. */
+.cp-hue, .cp-alpha { -webkit-appearance: none; appearance: none; display: block; width: 100%; min-width: 0; height: 12px; margin: 0; border-radius: 6px; cursor: pointer; box-shadow: var(--chip-ring); background: none; }
+.cp-hue { background: linear-gradient(to right, #f00 0%, #ff0 16.67%, #0f0 33.33%, #0ff 50%, #00f 66.67%, #f0f 83.33%, #f00 100%); }
+.cp-alpha {
+  flex: 1 1 0;
+  background: linear-gradient(to right, transparent, var(--cp-colour, #888)), repeating-conic-gradient(#d9d9d9 0 25%, #fff 0 50%) 0 0 / 8px 8px;
+}
+.cp-hue::-webkit-slider-thumb, .cp-alpha::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 0;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.cp-hue::-moz-range-thumb, .cp-alpha::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 0; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.3); }
+.cp-hue:focus-visible, .cp-alpha:focus-visible { outline: none; box-shadow: var(--chip-ring), 0 0 0 3px var(--focus-ring); }
+
+.cp-dropper {
+  flex: none; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--line-strong); border-radius: 6px;
+  background: var(--raised); color: var(--ink-2); cursor: pointer;
+}
+.cp-dropper svg { width: 16px; height: 16px; }
+.cp-dropper:hover { color: var(--ink); border-color: var(--ink-3); }
+.cp-dropper:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-halo); }
+
+/* The colour chosen, over a checkerboard where it is seen through. */
+.cp-chip { flex: none; width: 30px; height: 30px; border-radius: 6px; overflow: hidden; box-shadow: var(--chip-ring); background: repeating-conic-gradient(#d9d9d9 0 25%, #fff 0 50%) 0 0 / 8px 8px; }
+.cp-chip > span { display: block; width: 100%; height: 100%; }
+.cp-code > .hex-field { flex: 1 1 0; width: 0; height: 30px; font-size: 13px; line-height: 28px; padding: 0 8px; }
+.cp-code > .hex-field::placeholder { font-size: 12px; line-height: 28px; }
+
+.cp-section { display: grid; gap: 6px; }
+.cp-title { font: var(--text-small); color: var(--ink-3); }
+.cp-swatches { display: flex; flex-wrap: wrap; gap: 6px; }
+.cp-swatches .swatch { width: 20px; height: 20px; }
+.cp-swatches .swatch.on { box-shadow: var(--chip-ring), 0 0 0 2px var(--raised), 0 0 0 4px var(--accent); }
+.cp-swatches .swatch.on::after { -webkit-mask-size: 11px; mask-size: 11px; }
+
+/* A colour's well opened as a button: no edge of a button's own. */
+button.colour-well { border: 0; padding: 0; background: none; }
+button.colour-well:focus-visible { outline: none; box-shadow: 0 0 0 1px var(--line-strong), 0 0 0 4px var(--focus-ring); }
+button.swatch.custom.menu-open, button.colour-well.menu-open { box-shadow: var(--chip-ring), 0 0 0 2px var(--panel), 0 0 0 4px var(--accent-line); }

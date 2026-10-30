@@ -1615,7 +1615,7 @@ const SHORTCUTS = [
     ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
     ["⌘ S", "Save (Documents Also Save as You Work)"], ["⇧ ⌘ S", "Duplicate the Document"], ["⌘ N", "New Deck", "app"], ["⌥ ⌘ N", "New Talk…", "app"], ["⌘ W", "Close Tab", "app"],
     ["⇧ ⌘ ] [", "Next or Previous Tab"], ["⌥ ⌘ R", "Show in Finder", "app"],
-    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["%", "Snapping: to Guides and Objects, to the Grid, or Off (the Magnet; ⌘ While Dragging: the Other Way)"], ["#", "Show or Hide the Grid"], ["⇧ ⌘ A", "Align and Distribute (the Arrange Tab)"], ["⇧ ⌘ D", "Show or Hide Design (Themes, Colours, Fonts)"], ["⇧ ⌘ C", "Set Colour: Paste a Colour’s Code onto What Is Chosen (Nothing Chosen on a Slide: Its Background)"], ["? ⌘ /", "Keyboard Shortcuts"], ["⇧ ⌘ 1", "Welcome to Flexo Studio", "app"]]],
+    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["%", "Snapping: to Guides and Objects, to the Grid, or Off (the Magnet; ⌘ While Dragging: the Other Way)"], ["#", "Show or Hide the Grid"], ["⇧ ⌘ A", "Align and Distribute (the Arrange Tab)"], ["⇧ ⌘ D", "Show or Hide Design (Themes, Colours, Fonts)"], ["⇧ ⌘ C", "Set Colour: Paste a Colour’s Code onto What Is Chosen (Nothing Chosen on a Slide: Its Background)"], ["⌃ ⌘ C", "Pick Colour: a Colour from Anywhere on the Screen onto What Is Chosen (Another Object’s Own, Exactly)"], ["? ⌘ /", "Keyboard Shortcuts"], ["⇧ ⌘ 1", "Welcome to Flexo Studio", "app"]]],
   ["Finding", [["⌘ F", "Find in the Document (a Deck, a Figure)"], ["⌥ ⌘ F", "Find and Replace"], ["↩ ⇧ ↩", "Next or Previous Match (in the Find Field)"],
     ["N ⇧ N", "Next or Previous Match, While the Find Bar Is Open and No Words Are Typed (as Vim’s)"], ["⌘ E", "Find the Words Chosen (While Typing on a Slide: Code)"], ["Esc", "Close the Find Bar, the Last Match Chosen"],
     ["↩ ⌥ ↩", "Replace, or Replace All (in the Replace Field)"],
@@ -1650,7 +1650,7 @@ const SHORTCUTS = [
   // Shapes drawn where they are put, on a slide or over a figure (shapes.js); a path drawn
   // with the pen, and its points edited (pathtools.js).
   ["Shapes", [["← → ↑ ↓", "Nudge (⇧: Ten Points)"], ["↩", "Edit Its Words (a Group: Enter It)"], ["Double-Click", "Edit Its Words (a Path: Its Points; a Group: Enter It)"],
-    ["⌘ G", "Group"], ["⇧ ⌘ G", "Ungroup"], ["⌘ L", "Lock"], ["⌥ ⌘ L", "Unlock"], ["⌘ D", "Duplicate"], ["⌫", "Delete"], ["⇧ ⌘ C", "Set Colour"], ["Esc", "Deselect (in a Group: Leave It)"],
+    ["⌘ G", "Group"], ["⇧ ⌘ G", "Ungroup"], ["⌘ L", "Lock"], ["⌥ ⌘ L", "Unlock"], ["⌘ D", "Duplicate"], ["⌫", "Delete"], ["⇧ ⌘ C", "Set Colour"], ["⌃ ⌘ C", "Pick Colour"], ["Esc", "Deselect (in a Group: Leave It)"],
     ["⇧ Drag", "Move Along One Way; by a Corner, Keep Its Proportions; Turn by 15°"], ["⇧ Drag", "A Line’s End, or a Line Drawn: by 45°; a Shape Drawn: a Square"],
     ["⌥ Drag", "Move: a Copy; Size or Draw: From Its Centre"], ["⌘ Drag", "Without Snapping (Snapping Off: With It)"], ["Esc", "Cancel a Drag, or Stop Drawing"]]],
   ["Drawing a Path", [["Click", "A Corner (Drag: a Smooth Point)"], ["↩", "Finish (or Double-Click)"], ["⌫", "Remove the Last Point"], ["⇧ Drag", "A Handle Along One of Eight Ways"],

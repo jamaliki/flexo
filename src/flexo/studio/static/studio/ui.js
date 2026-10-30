@@ -2,7 +2,8 @@
 // Every field a person types in can carry a `key`, so a form drawn again while
 // they type (someone else changed the document) gives them their field back.
 
-import { hexField, hexOf, shownHex, recentColours, rememberColour, applyColour } from "./hexcolour.js";
+import { hexField, hexOf, shownHex, recentColours, applyColour } from "./hexcolour.js";
+import { openColourPicker } from "./colourpicker.js";
 
 // -- elements -------------------------------------------------------------------------
 
@@ -130,6 +131,8 @@ const ICONS = {
   structure: "M2 8c1.5-6 3-6 4 0s2.5 6 4 0 2.5-6 4 0",
   flow: "M4.5 1.5h7v3h-7zM8 4.5v2M8 6.5l3.5 3L8 12.5l-3.5-3zM8 12.5v2",
   palette: "M8 2a6 6 0 100 12c1 0 1.5-.7 1.5-1.5S9 11 9 10s.8-1.5 1.8-1.5H12A2.5 2.5 0 0014 6c0-2.2-2.7-4-6-4zM5 7.5h.01M7 5h.01M10 5h.01",
+  // A colour taken from the screen: a pipette, its bulb at the top right.
+  eyedropper: "M8.6 4.4l1.7-1.7a1.85 1.85 0 012.6 2.6l-1.7 1.7zM9.8 5.7L3.6 11.9 3 13.4l1.5-.6 6.2-6.2",
   type: "M3 4V3h10v1M8 3v10M6 13h4",
   notes: "M4 2.5h8v11H4zM6 5.5h4M6 8h4M6 10.5h2",
   panel: "M2.5 3h11v10h-11zM10 3v10",
@@ -716,13 +719,16 @@ export const ui = {
     return node;
   },
 
-  // Colours to choose from; `custom` adds one more, any colour, from the system's picker. A
+  // Colours to choose from; `custom` adds one more, any colour, from the studio's picker
+  // (colourpicker.js: its plane, the eyedropper, the colours drawn -- one of these, taken by
+  // the picker, is chosen here by its name). A
   // row of them is one stop for Tab, as a segmented control is; the chosen one is ticked,
   // the one with the keys ringed with the focus's glow.
   // A custom colour also by its code, typed or pasted, beside the label (hexcolour.js): taken,
   // `onChange(hex, { alpha })` -- its alpha, written after it (#1f77b4cc), for the thing's
   // opacity where it has one -- one step of its own; and the colours applied last, offered.
-  swatches({ value, colours, onChange, none = true, noneTitle = "None", custom = false, key } = {}) {
+  // `opacity`: the thing's opacity now, for the picker's Opacity (its `alpha`, as a code's).
+  swatches({ value, colours, onChange, none = true, noneTitle = "None", custom = false, key, opacity } = {}) {
     const node = h("div.swatches", { role: "radiogroup" });
     // `noneTitle`: what no colour of its own is ("Default", where it is the words' own colour).
     const all = [...(none ? [{ value: null, colour: null, title: noneTitle }] : []), ...colours];
@@ -745,17 +751,23 @@ export const ui = {
     let well = null;
     if (custom) {
       const own = HEX.test(value || "") && !all.some((item) => item.value === value) ? value : null;
-      const input = h("input", { type: "color", value: own || "#888888", title: "Custom colour", "aria-label": "Custom colour" });
-      well = h(`label.swatch.custom${own ? ".on" : ""}${own && light(own) ? ".light" : ""}`, { title: "Custom colour", style: own ? { background: own } : {} }, icon("plus"), input);
-      input.addEventListener("input", () => { well.style.background = input.value; well.classList.toggle("light", light(input.value)); field?.show(input.value); choose(well, input.value); });
-      input.addEventListener("change", () => rememberColour(input.value));
+      well = h(`button.swatch.custom${own ? ".on" : ""}${own && light(own) ? ".light" : ""}`, { type: "button", role: "radio", "aria-checked": String(Boolean(own)), "aria-haspopup": "dialog",
+        title: "Custom Colour", "aria-label": "Custom Colour", style: own ? { background: own } : {} }, icon("plus"));
+      const shown = (hex) => { well.style.background = hex; well.classList.toggle("light", light(hex)); };
+      // The picker's colour: one of the row's by its name, else the well's, by its code.
+      well.addEventListener("click", () => openColourPicker(well, { value, offered: colours, opacity, title: "Custom Colour",
+        onChange: (next, how = {}) => {
+          const at = all.findIndex((item) => item.value === next);
+          if (at >= 0 && buttons[at]) { choose(buttons[at], next, how); return; }
+          shown(next);
+          field?.show(next);
+          choose(well, next, how);
+        } }));
       node.append(well);
       // A code taken is the well's colour, as if picked there (the colour as it is written, never
       // one of the theme's by its name, which a theme changes).
       const taken = (hex, alpha) => applyColour(() => {
-        input.value = hex;
-        well.style.background = hex;
-        well.classList.toggle("light", light(hex));
+        shown(hex);
         choose(well, hex, { alpha });
       }, hex, alpha);
       const said = value === undefined ? "Mixed" : value === null ? (/^(no |none)/i.test(noneTitle) ? "None" : "Theme") : typeof value === "object" ? "Gradient" : "Theme";
@@ -764,28 +776,35 @@ export const ui = {
       node.besideLabel = h("div.hex-side", {}, recentDots((hex) => { field.show(hex); taken(hex, null); }), field);
       node.append(node.besideLabel);
     }
-    const keys = roving(node, () => [...buttons, ...(well ? [well.querySelector("input")] : [])],
+    const keys = roving(node, () => [...buttons, ...(well ? [well] : [])],
       key || `swatches:${all.map((item) => item.value).join("|")}`);
     return node;
   },
 
-  // One colour of a thing's own, or none (the theme's): a well that opens the system's
-  // picker, its code typed or pasted beside it (hexcolour.js: `onChange(hex, { alpha })`, one
-  // step of its own), and a button to go back to the theme's.
+  // One colour of a thing's own, or none (the theme's): a well that opens the studio's
+  // picker (colourpicker.js), its code typed or pasted beside it (hexcolour.js:
+  // `onChange(hex, { alpha })`, one step of its own), and a button to go back to the theme's.
   colour({ value, onChange, title = "", key } = {}) {
     const set = HEX.test(value || "") ? value : null;
-    const input = h("input", { type: "color", value: set || "#888888", "data-key": key, "aria-label": [title, "Colour"].filter(Boolean).join(" ") });
-    const well = h(`label.colour-well${set ? "" : ".unset"}`, { title: [title, set || "Default"].filter(Boolean).join(": ") },
-      h("span.colour-chip", { style: set ? { background: set } : {} }), input);
-    input.addEventListener("input", () => { well.classList.remove("unset"); well.firstChild.style.background = input.value; field.show(input.value); onChange?.(input.value); });
-    input.addEventListener("change", () => rememberColour(input.value));
-    const reset = ui.button("", () => { well.classList.add("unset"); well.firstChild.style.background = ""; field.show(null); reset.hidden = true; onChange?.(null); },
+    const well = h(`button.colour-well${set ? "" : ".unset"}`, { type: "button", "data-key": key, "aria-haspopup": "dialog", "aria-label": [title, "Colour"].filter(Boolean).join(" "),
+      title: [title, set || "Default"].filter(Boolean).join(": ") },
+      h("span.colour-chip", { style: set ? { background: set } : {} }));
+    let now = set;
+    well.addEventListener("click", () => openColourPicker(well, { value: now, title: title || "Colour",
+      onChange: (hex, how = {}) => {
+        now = hex;
+        well.classList.remove("unset");
+        well.firstChild.style.background = hex;
+        field.show(hex);
+        reset.hidden = false;
+        onChange?.(hex, how);
+      } }));
+    const reset = ui.button("", () => { now = null; well.classList.add("unset"); well.firstChild.style.background = ""; field.show(null); reset.hidden = true; onChange?.(null); },
       { kind: "ghost", small: true, icon: "undo", title: "Reset" });
     reset.hidden = !set;
-    input.addEventListener("input", () => { reset.hidden = false; });
     const field = hexField({ value: hexOf(value), placeholder: "Default", title: title || "Colour", key: key ? `${key}:hex` : null,
       apply: (hex, alpha) => applyColour(() => {
-        input.value = hex;
+        now = hex;
         well.classList.remove("unset");
         well.firstChild.style.background = hex;
         well.title = [title, shownHex(hex)].filter(Boolean).join(": ");
