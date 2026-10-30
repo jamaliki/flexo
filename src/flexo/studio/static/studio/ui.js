@@ -491,6 +491,21 @@ export const ui = {
       // its own. One whose words take new lines (`lines`) is done with ⌘Return.
       if (event.key === "Enter" && !event.isComposing && (lines ? mod : rows === 1 && !event.shiftKey)) { event.preventDefault(); area.blur(); }
     });
+    // An address pasted over words chosen links them, as in Pages: [words](address), the caret
+    // after it. (Over nothing chosen, it is pasted as it is.)
+    area.addEventListener("paste", (event) => {
+      const href = links ? addressOf(event.clipboardData?.getData("text/plain")) : null;
+      const { selectionStart: start, selectionEnd: end, value } = area;
+      const words = value.slice(start, end);
+      if (!href || !words.trim() || words.includes("\n")) return;
+      event.preventDefault();
+      const made = `[${words}](${href})`;
+      if (!document.execCommand?.("insertText", false, made) || area.value === value) {
+        area.setRangeText(made, start, end, "end");
+        area.dispatchEvent(new Event("input"));
+      }
+      area.setSelectionRange(start + made.length, start + made.length);
+    });
     // The tools show while the field is typed in (studio.css) and are worked by the pointer,
     // the keys beside each name doing the same: Tab goes from field to field, not through them.
     const tool = (label, title, before, after, style) =>
@@ -883,6 +898,17 @@ function fit(area) {
 // Marks put round the words chosen (or round nothing, the caret between them), as typing
 // would put them: the field's own ⌘Z takes them back. The words stay chosen -- or, for a link
 // round words, its address is, to be typed over.
+// Words that are one web address (or an e-mail's), as pasted: the address a link to it is
+// written with -- a page's from "www." on, an e-mail's as mailto:, no space or bracket in it to
+// end it early -- else null.
+function addressOf(text) {
+  const words = String(text ?? "").trim();
+  const mail = /^[^\s@<>()[\]:;,"]+@[^\s@<>()[\]:;,"]+\.[a-z]{2,}$/i.test(words);
+  if (!mail && !/^(?:https?:\/\/|ftp:\/\/|mailto:|www\.)[^\s<>"]+$/i.test(words)) return null;
+  const href = mail ? `mailto:${words}` : /^www\./i.test(words) ? `https://${words}` : words;
+  return href.replace(/[\s()]/g, (mark) => `%${mark.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`);
+}
+
 function wrap(area, before, after) {
   const { selectionStart: start, selectionEnd: end, value } = area;
   const inner = value.slice(start, end);

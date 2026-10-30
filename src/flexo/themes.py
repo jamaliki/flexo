@@ -39,6 +39,8 @@ from flexo.colour import (
     with_lightness,
 )
 from flexo.conventions import Conventions
+from flexo.dark_themes import SUFFIX as DARK
+from flexo.dark_themes import dark_version, has_dark_version
 from flexo.diagnostics import Diagnostic, FlexoError
 from flexo.sketch import Sketch
 from flexo.style import (
@@ -880,6 +882,11 @@ def theme(name: str) -> Theme:
 
         resolved = resolve_theme(name)
         found = THEMES.get(resolved) if resolved else THEMES.get(name)
+    if found is None and name.endswith(DARK) and name != DARK:
+        # A theme of one's own (registered by name) turned over, as flexo's are.
+        base = THEMES.get(name.removesuffix(DARK))
+        if base is not None and has_dark_version(base):
+            found = _register(dark_version(base, name))
     if found is None:
         raise FlexoError(unknown_theme(name))
     return found
@@ -1033,6 +1040,10 @@ _register(
         tinted(),
     )
 )
+
+# And each light theme's dark version, turned over: paper-dark, swiss-dark (flexo.dark_themes).
+for _light in [registered for registered in THEMES.values() if has_dark_version(registered)]:
+    _register(dark_version(_light))
 
 STYLES.clear()
 STYLES.update({name: registered.style for name, registered in THEMES.items()})

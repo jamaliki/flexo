@@ -4,12 +4,14 @@
 
 import { h, clear, icon, ui, popover, closeMenu, toast } from "./ui.js";
 
-// A theme's name as a person reads it: flexo's own are named by id ("paper" is Paper);
-// a theme file's name is as its file gives it.
+// A theme's name as a person reads it: flexo's own are named by id ("paper" is Paper, its
+// dark version "paper-dark" Paper Dark); a theme file's name is as its file gives it.
 const NAMES = { tikz: "TikZ", midcentury: "Mid-Century" };
 export function themeName(card) {
   const name = String(card.title || card.value || "");
   if (card.source === "folder" || /\.(ya?ml|json)$/i.test(name)) return name;
+  const dark = /^(.+)-dark$/.exec(name);
+  if (dark && NAMES[dark[1]]) return `${NAMES[dark[1]]} Dark`;
   return NAMES[name] || name.replace(/[_-]+/g, " ").replace(/(^|\s)([a-z])/g, (_, before, letter) => before + letter.toUpperCase());
 }
 

@@ -26,6 +26,7 @@ import { dropPlace, stays, lineAt, groupAt, endAt, endOff, endsOf, seenOrder } f
 import { drawingSections } from "/static/kinds/figure/drawing.js";
 import * as Styles from "/static/studio/styles.js";
 import * as Snap from "/static/studio/snapping.js";
+import * as Like from "/static/kinds/figure/sizelike.js";
 import { parseColour, rememberColour } from "/static/studio/hexcolour.js";
 import { structureColours, schemeClears } from "/static/kinds/figure/structurecolours.js";
 import * as Frames from "/static/kinds/figure/structframes.js";
@@ -2910,14 +2911,18 @@ export function figureParts(host) {
     const drawing = document.createElementNS(SVG_NS, "svg");
     drawing.classList.add("fig-end-drag", "fig-size-drag");
     const outline = document.createElementNS(SVG_NS, node?.kind === "decision" ? "polygon" : node?.kind === "circle" ? "ellipse" : "rect");
-    drawing.append(outline);
+    // (And the bars of a size it catches at, another part's: sizelike.js.)
+    const bars = document.createElementNS(SVG_NS, "g");
+    drawing.append(outline, bars);
+    const others = Like.partsOf((model()?.nodes || []).filter((other) => other.id !== id)
+      .map((other) => (other.kind === "person" ? host.element(other.id) : host.element(`${other.id}.body`) || host.element(other.id))?.getBoundingClientRect?.()), unit);
     const tip = h("div.fig-turn-tip", { hidden: true });
     // (A person's name, under its figure: its band, which stays as it is.)
     const figure = node?.kind === "person" ? drawnRect(host.element(`${id}.body`)) : null;
     const band = figure?.height ? Math.max(0, box.bottom - figure.bottom) / unit : 0;
     // (A text's words are shown wrapping where they will as it is dragged, its own hidden.)
     const words = sideways ? textPreview(id, node, unit) : null;
-    shapeSizing = { id, element, box, unit, fit, band, kind: node?.kind, sideways, words, drawing, outline, tip, moved: false, start: { x: event.clientX, y: event.clientY },
+    shapeSizing = { id, element, box, unit, fit, band, kind: node?.kind, sideways, words, drawing, outline, bars, others, tip, moved: false, start: { x: event.clientX, y: event.clientY },
       had: { width: node?.width ?? null, height: node?.height ?? null },
       anchor: { x: west ? box.right : box.left, y: north ? box.bottom : box.top }, west, north, size: null };
     window.addEventListener("pointermove", shapeSizeMove);
@@ -2934,13 +2939,15 @@ export function figureParts(host) {
     // which would run past it -- snapping to the width its words take of themselves, or back
     // to its own.
     if (sizing.sideways) {
-      const near = free ? 0 : SIZE_SNAP / unit, was = box.width / unit;
+      const near = free ? 0 : SIZE_SNAP / unit, was = box.width / unit, least = Math.ceil(sizing.words?.least ?? TEXT_LEAST);
       // (In whole points, as it is written: its words wrapped at that width, not a fraction more.)
-      let width = Math.max(Math.ceil(sizing.words?.least ?? TEXT_LEAST), Math.round(Math.abs(clientX - anchor.x) / unit));
-      const snapped = { width: Math.abs(width - fit.width) < near, height: false }, kept = { width: false, height: true };
-      if (snapped.width) width = fit.width;
-      else if (Math.abs(width - was) < near) { kept.width = true; width = was; }
-      return { width, height: box.height / unit, snapped, kept, fitted: snapped.width, said: snapped.width ? "Fits Its Words" : `${Math.round(width)} pt Wide` };
+      let width = Math.max(least, Math.round(Math.abs(clientX - anchor.x) / unit));
+      // The nearest of the width that fits its words, its own, and another part's.
+      const caught = Like.nearestSize(width, [{ size: fit.width, how: "fit" }, { size: was, how: "was" }, ...Like.sizesOf(sizing.others || [], "width", least)], near);
+      const snapped = { width: caught?.how === "fit", height: false }, kept = { width: caught?.how === "was", height: true };
+      if (caught) width = caught.size;
+      const matched = { width: caught?.how === "like" ? width : null, height: null };
+      return { width, height: box.height / unit, snapped, kept, matched, fitted: snapped.width, said: snapped.width ? "Fits Its Words" : `${Math.round(width)} pt Wide` };
     }
     let width = Math.max(8, Math.abs(clientX - anchor.x)) / unit, height = Math.max(8, Math.abs(clientY - anchor.y)) / unit;
     const was = { width: box.width / unit, height: box.height / unit };
@@ -2973,21 +2980,30 @@ export function figureParts(host) {
       height = Math.max(height, fit.height);
     }
     const near = free ? 0 : SIZE_SNAP / unit;
-    const snapped = { width: false, height: false }, kept = { width: false, height: false };
+    const snapped = { width: false, height: false }, kept = { width: false, height: false }, matched = { width: null, height: null };
     // (A plot has no words to fit: a side snaps only back to what it was.)
     const plot = kind === "plot";
+    const others = near ? sizing.others || [] : [];
     if (PROPORTIONED.has(kind)) {
-      // (In proportion, both sides fit its words at once.)
-      if (Math.abs(height - fit.height) < near) { snapped.width = snapped.height = true; width = fit.width; height = fit.height; }
+      // (In proportion, both sides fit its words at once -- or a circle is as big as another part.)
+      const like = kind === "circle" ? [...Like.sizesOf(others, "height", fit.height), ...Like.sizesOf(others, "width", fit.height)] : [];
+      const caught = Like.nearestSize(height, [{ size: fit.height, how: "fit" }, ...like], near);
+      if (caught?.how === "fit") { snapped.width = snapped.height = true; width = fit.width; height = fit.height; }
+      else if (caught) { width = height = caught.size; matched.width = matched.height = caught.size; }
     } else if (!keep) {
       for (const side of ["width", "height"]) {
-        if (!plot && Math.abs((side === "width" ? width : height) - fit[side]) < near) { snapped[side] = true; if (side === "width") width = fit.width; else height = fit.height; }
-        else if (Math.abs((side === "width" ? width : height) - was[side]) < near) { kept[side] = true; if (side === "width") width = was.width; else height = was.height; }
+        // The nearest of the size that fits its words, its own, and another part's (never less
+        // than its words need).
+        const caught = Like.nearestSize(side === "width" ? width : height, [...(plot ? [] : [{ size: fit[side], how: "fit" }]), { size: was[side], how: "was" },
+          ...Like.sizesOf(others, side, plot ? PLOT_LEAST[side] : fit[side])], near);
+        if (!caught) continue;
+        if (caught.how === "fit") snapped[side] = true; else if (caught.how === "was") kept[side] = true; else matched[side] = caught.size;
+        if (side === "width") width = caught.size; else height = caught.size;
       }
     }
     const fitted = snapped.width && snapped.height;
     const said = fitted ? "Fits Its Words" : plot ? plotSaid({ width, height }, sizing.had) : `${Math.round(width)} × ${Math.round(height)} pt`;
-    return { width, height, snapped, kept, fitted, said };
+    return { width, height, snapped, kept, matched, fitted, said };
   }
   // A plot's size as it is dragged, said in the unit it will be written in: "63 × 40 mm".
   function plotSaid(size, had) {
@@ -3030,12 +3046,14 @@ export function figureParts(host) {
       Object.assign(node.style, { left: `${left + inset}px`, top: `${top + inset}px`, width: `${room}px` });
       const tall = node.offsetHeight + 2 * inset;
       for (const [key, value] of Object.entries({ x: left, y: top, width: w, height: tall, rx: 4 })) outline.setAttribute(key, String(value));
+      Like.drawLike(sizing.bars, outer, [left, top, left + w, top + tall], sizing.others || [], size.matched);
       tip.hidden = false;
       tip.textContent = size.said;
       Object.assign(tip.style, { left: `${left + w / 2}px`, top: `${top + tall + 8}px` });
       outline.classList.toggle("fits", size.fitted);
       return;
     } else for (const [key, value] of Object.entries({ x: left, y: top, width: w, height: ht, rx: 4 })) outline.setAttribute(key, String(value));
+    Like.drawLike(sizing.bars, outer, [left, top, left + w, top + ht], sizing.others || [], size.matched);
     outline.classList.toggle("fits", size.fitted);
     tip.hidden = false;
     tip.textContent = size.said;

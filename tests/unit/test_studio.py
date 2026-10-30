@@ -4284,3 +4284,62 @@ def test_a_refused_key_and_a_server_not_running_are_said_as_they_are(monkeypatch
     monkeypatch.setattr(other, "list_models", unreachable)
     with pytest.raises(openai.APIConnectionError):
         other.converse(None, {})
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_an_address_pasted_over_words_chosen_in_a_markup_field_links_them() -> None:
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/studio/ui.js"
+    code = FAKE_PAGE + (
+        """
+// A field's events heard, and its words and choice kept, as a browser's textarea keeps them.
+Node.prototype.addEventListener = function (type, listener) {
+  ((this.heard ||= {})[type] ||= []).push(listener);
+};
+Node.prototype.setRangeText = function (text, start, end) {
+  this.value = this.value.slice(0, start) + text + this.value.slice(end);
+};
+Node.prototype.setSelectionRange = function (start, end) {
+  this.selectionStart = start; this.selectionEnd = end;
+};
+Node.prototype.dispatchEvent = function () {};
+globalThis.Event = class { constructor(type) { this.type = type; } };
+globalThis.requestAnimationFrame = () => 0;
+globalThis.ResizeObserver = class { observe() {} };
+document.execCommand = () => false;
+"""
+        f"const {{ ui }} = await import({json.dumps(script.as_uri())});\n"
+        """
+const paste = (field, words, start, end, text) => {
+  const area = field.area;
+  area.value = words; area.selectionStart = start; area.selectionEnd = end;
+  let taken = false;
+  const event = { clipboardData: { getData: () => text }, preventDefault() { taken = true; } };
+  for (const listener of area.heard.paste || []) listener(event);
+  return [area.value, taken, area.selectionStart];
+};
+const said = [
+  // "Lab" chosen, an address pasted: the words linked, the caret after the link.
+  paste(ui.markup({}), "Smith Lab 2026", 6, 9, "www.smithlab.org"),
+  // An e-mail's address, and one with a bracket in it.
+  paste(ui.markup({}), "Write to me", 9, 11, " ada@lab.org "),
+  paste(ui.markup({}), "the paper", 4, 9, "https://doi.org/10.1/x(y)"),
+  // Nothing chosen, words that are no address, or a field whose words link nowhere: as ever.
+  paste(ui.markup({}), "Smith Lab", 9, 9, "https://smithlab.org"),
+  paste(ui.markup({}), "Smith Lab", 6, 9, "not an address"),
+  paste(ui.markup({ links: false }), "Smith Lab", 6, 9, "https://smithlab.org"),
+];
+console.log(JSON.stringify(said));
+process.exit(0);
+"""
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == [
+        ["Smith [Lab](https://www.smithlab.org) 2026", True, 37],
+        ["Write to [me](mailto:ada@lab.org)", True, 33],
+        ["the [paper](https://doi.org/10.1/x%28y%29)", True, 42],
+        ["Smith Lab", False, 9],
+        ["Smith Lab", False, 6],
+        ["Smith Lab", False, 6],
+    ]
