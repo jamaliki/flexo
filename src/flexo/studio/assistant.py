@@ -24,6 +24,7 @@ import time
 import traceback
 from typing import Any
 
+from flexo.studio import turns
 from flexo.studio.agent import INSTRUCTIONS, TOOLS, Tools
 from flexo.studio.workspace import Workspace
 
@@ -768,6 +769,8 @@ class Assistant:
             with self.lock:
                 self.transcript.append(turn)
             self._send({"event": "turn", "item": turn})
+            # Its edits for this request are one change, named by it (flexo.studio.turns).
+            turns.of(self.workspace).begin(self.who, text, held=True)
             try:
                 ended = provider.converse(self, turn)
             except Exception as error:
@@ -788,6 +791,7 @@ class Assistant:
                     self._send({"event": "error", "turn": turn["id"], "text": said})
                 else:
                     self._send({"event": "done", "turn": turn["id"]})
+            turns.of(self.workspace).end(self.who)
             # Done: shown as lately at work where it worked, and not at all if it did nothing.
             if any(part.get("type") == "tool" for part in turn["parts"]):
                 self.workspace.set_presence(self.who, None, None, "")

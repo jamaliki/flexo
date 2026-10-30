@@ -46,6 +46,7 @@ from flexo.studio import (
     nearness,
     pictures,
     taking_turns,
+    turns,
     writer,
 )
 from flexo.studio.merge import merge3
@@ -1278,7 +1279,9 @@ class Workspace:
             notes = describe(before, after) if describe else [{"text": "edited", "where": None}]
         except Exception:
             notes = [{"text": "edited", "where": None}]
-        for note in notes[:6]:
+        # An agent's change is its turn's: one row for all it did for one request (turns).
+        held = turns.took(self, doc, who, before, after, notes)
+        for note in [] if held else notes[:6]:
             self.record(who, doc.name, note["text"], note.get("where"))
         if who.get("kind") == "agent" and notes:
             self.set_presence(who, doc.name, notes[-1].get("where"), None)

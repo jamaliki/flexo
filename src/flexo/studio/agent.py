@@ -16,8 +16,9 @@ from typing import Any
 
 import yaml
 
-from flexo.studio import agent_guides, agent_look, agent_read, agent_report
+from flexo.studio import agent_guides, agent_look, agent_read, agent_report, turns
 from flexo.studio.agent_look import MAX_LOOK, MAX_SHEET
+from flexo.studio.commenting import COMMENT_TOOLS, COMMENTS_SAID, Commenting
 from flexo.studio.workspace import Workspace
 
 TOOLS: list[dict[str, Any]] = [
@@ -210,6 +211,24 @@ TOOLS: list[dict[str, Any]] = [
     },
 ]
 
+LABEL: dict[str, Any] = {
+    "type": "string",
+    "description": (
+        "What the user asked for, in a few words ('Add a results slide'): the same for every edit "
+        "made for one request. Those edits are one change for the user, named so, undone at once."
+    ),
+}
+LABELLED = {"edit_document", "write_document", "convert_to_figure_parts"}
+"""The tools that change a document, which take a ``label`` naming the turn the change is part
+of (``flexo.studio.turns``); the comment tools take one too."""
+for _tool in TOOLS:
+    if _tool["name"] in LABELLED:
+        _tool["input_schema"]["properties"]["label"] = LABEL
+TOOLS += COMMENT_TOOLS
+LABELLED |= {
+    tool["name"] for tool in COMMENT_TOOLS if "label" in tool["input_schema"]["properties"]
+}
+
 INSTRUCTIONS = """\
 Flexo studio is open in the user's browser on this folder: they watch the documents you work on \
 change as you change them, and may edit the same documents at the same time. Work in small \
@@ -228,9 +247,14 @@ warnings, and what the user has selected; read only the slides you need. guide(t
 one thing at a time, with examples. An edit's reply says what it changed and deleted, and what \
 to look at next: look once, and stop when nothing is warned of and it reads as meant. Where valid \
 YAML is laid out badly, tell the user it is a Flexo bug rather than nudging places and sizes."""
+INSTRUCTIONS += (
+    " Give every edit a label saying what the user asked for, in a few words, the same for all the "
+    "edits of one request: they are one change the user sees by that name and can undo at once. "
+    + COMMENTS_SAID
+)
 
 
-class Tools:
+class Tools(Commenting):
     """The tools, acting for one agent on one workspace."""
 
     def __init__(self, workspace: Workspace, who: dict[str, Any]) -> None:
@@ -244,6 +268,11 @@ class Tools:
         handler = getattr(self, f"_{name}", None)
         if handler is None or name not in {tool["name"] for tool in TOOLS}:
             return [_text(f"There is no tool {name}.")], True
+        if name in LABELLED:
+            # (Its label names the turn the change is part of: one change for the user.)
+            arguments = dict(arguments)
+            label = arguments.pop("label", None)
+            turns.of(self.workspace).begin(self.who, label if isinstance(label, str) else None)
         try:
             inspect.signature(handler).bind(**arguments)
         except TypeError as error:

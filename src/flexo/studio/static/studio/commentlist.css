@@ -1,0 +1,22 @@
+/* The side panel's Comments (commentlist.js): Open and Resolved, then a row for each thread, as
+   the activity's rows are -- who, when, the words, where -- and Resolve at its right. */
+
+.comment-list { position: absolute; inset: 0; display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+.comment-list-head { padding: 10px 12px 6px; }
+.comment-list-head .segmented { width: 100%; }
+.comment-list-head .segmented button { flex: 1; }
+.comment-rows { overflow: auto; padding: 4px 8px 8px; min-height: 0; }
+.comment-list-row { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: start; padding: 8px; border-radius: 8px; }
+.comment-list-row:hover { background: var(--sunken); }
+.comment-list-go { display: grid; gap: 2px; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; line-height: 1.4; }
+.comment-list-who { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.comment-list-who b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.comment-list-time { color: var(--ink-3); font-size: 11px; white-space: nowrap; }
+.comment-list-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; }
+.comment-list-where { color: var(--ink-3); font-size: 11.5px; }
+.comment-list-row .btn.small { width: 26px; height: 24px; padding: 0; opacity: 0.6; }
+.comment-list-row:hover .btn.small, .comment-list-row .btn.small:focus-visible { opacity: 1; }
+.comment-list-row.resolved .comment-list-text, .comment-list-row.resolved .comment-list-who b { color: var(--ink-2); }
+
+/* Three tabs in the narrow panel (a narrow window's): their names alone. */
+@media (max-width: 1239px) { .side-tab { padding: 0 8px; } .side-tab svg { display: none; } }
