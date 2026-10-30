@@ -4,6 +4,7 @@ font's measures, drawn as outlines, and said in words when it cannot be read."""
 from __future__ import annotations
 
 import random
+import re
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -203,6 +204,22 @@ def test_a_formula_is_outlines_and_rules_that_every_writer_reads() -> None:
     assert tags == {"path", "rect"}
     drawing = read_drawing(ET.tostring(root, encoding="unicode"))
     assert len(list(drawing.walk())) == len(group)
+
+
+def test_each_glyph_says_which_glyph_it_is_the_same_at_any_size() -> None:
+    """A slide that morphs from one equation into another moves each symbol they share: each
+    glyph says its face and glyph (``data-g``) -- the same in a script as on the line -- and a
+    rule says it is one."""
+
+    root = ET.Element(f"{{{SVG_NS}}}svg")
+    big = draw(root, _set(r"x + \frac{1}{x}"), 0.0, 20.0)
+    small = draw(root, _set(r"x^{x}"), 0.0, 40.0)
+    keys = [child.get("data-g") for child in big]
+    assert all(keys) and "rule" in keys
+    assert len({key for key in keys if key != "rule"}) == 3  # x, +, 1: x twice
+    x = keys[0]
+    assert [child.get("data-g") for child in small] == [x, x]
+    assert all(re.fullmatch(r"[0-9a-f]{6}:\d+i?", key) for key in keys if key != "rule")
 
 
 def test_simple_maths_stays_words_and_the_rest_is_laid_out() -> None:

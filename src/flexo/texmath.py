@@ -21,6 +21,7 @@ import itertools
 import math
 import re
 import xml.etree.ElementTree as ET
+import zlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -3253,6 +3254,14 @@ def _n(value: float) -> str:
     return f"{rounded:g}"
 
 
+@lru_cache(maxsize=64)
+def _face_tag(face: Face) -> str:
+    """A face named briefly, and the same each time it is drawn: what a glyph's ``data-g`` says
+    of it."""
+
+    return f"{zlib.crc32(repr(face.key).encode('utf-8')) & 0xFFFFFF:06x}"
+
+
 def draw(
     parent: ET.Element,
     formula: Typeset,
@@ -3265,8 +3274,11 @@ def draw(
     """``formula`` drawn into ``parent`` with its baseline's left end at ``(x, y)``.
 
     The group names its source (``data-flexo-math``) for whoever reads the SVG
-    again. ``colour`` turns a colour the formula names (``\\color{accent}``) into a
-    fill and the palette role that painted it; the group's own fill is ``attributes``'.
+    again, and each glyph what it is (``data-g``: its face and its glyph, ``f3a9c1:68``, the
+    same whatever its size; a rule ``rule``) -- for a slide that morphs into another to move
+    each symbol the two equations share to its place. ``colour`` turns a colour the formula
+    names (``\\color{accent}``) into a fill and the palette role that painted it; the group's
+    own fill is ``attributes``'.
     """
 
     group = element(
@@ -3289,7 +3301,9 @@ def draw(
         if isinstance(item, GlyphItem):
             d = _scaled_path(item.face, item.gid, item.size, item.slant)
             if d:
-                element(group, "path", d=d, transform=f"translate({_n(ox)} {_n(-oy)})", **paint)
+                glyph = f"{_face_tag(item.face)}:{item.gid}{'i' if item.slant else ''}"
+                place = f"translate({_n(ox)} {_n(-oy)})"
+                element(group, "path", d=d, transform=place, data__g=glyph, **paint)
         else:
             element(
                 group,
@@ -3298,6 +3312,7 @@ def draw(
                 y=_n(-(oy + item.height)),
                 width=_n(item.width),
                 height=_n(item.height),
+                data__g="rule",
                 **paint,
             )
     return group
